@@ -26,6 +26,7 @@ Zongming Li<sup>1,\*</sup>, [Tianheng Cheng](https://scholar.google.com/citation
 
 
 ## News
+`[2026-08-02]:` We release a fast inference engine ([fast_inference/](fast_inference/)) based on torch.compile + CUDA graphs: **11.4×** faster single-image sampling and **8.8×** batch throughput, with numerically identical outputs.\
 `[2025-01-23]:` Our ControlAR has been accepted by ICLR 2025 🚀 !\
 `[2024-12-12]:` We introduce a control strength factor, employ a larger control encoder(dinov2-base), and optimize text alignment capabilities along with generation diversity. New model weight: depth_base.safetensors and edge_base.safetensors. The edge_base.safetensors can handle three types of edges, including Canny, HED, and Lineart.\
 `[2024-10-31]:` The code and models have been released!\
@@ -201,6 +202,21 @@ python3 autoregressive/sample/sample_t2i_MR.py --vq-ckpt checkpoints/vq/vq_ds16_
 --condition-type canny --condition-path condition/example/t2i/multi_resolution/bird.jpg \
 --prompt 'colorful bird' --seed 0
 ```
+
+#### 5. Fast inference (torch.compile + CUDA graphs)
+
+We provide a drop-in fast sampling engine in [fast_inference/](fast_inference/): **11.4×** faster single-image latency (64.8 s → 5.7 s on RTX 3090) and up to **8.8×** batch throughput, with outputs numerically identical to the official implementation.
+
+```bash
+PYTHONPATH=$PWD python fast_inference/fast_engine.py \
+--gpt-ckpt checkpoints/t2i/hed.safetensors \
+--condition-path condition/example/t2i/multigen/eye.png \
+--prompt "a beautiful blue eye, ultra detailed" \
+--compile-mode reduce-overhead --e2e --num-images 1 --warmup 1 \
+--out /tmp/fast.png
+```
+
+See [fast_inference/README.md](fast_inference/README.md) for batch generation and benchmark details.
 
 ### Preparing Datasets
 We provide the dataset datails for evaluation and training. If you don't want to train ControlAR, just download the validation splits.
