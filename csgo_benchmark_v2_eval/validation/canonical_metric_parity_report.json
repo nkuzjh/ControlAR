@@ -1,0 +1,57 @@
+{
+  "check": "synthetic canonical metric parity",
+  "status": "pass",
+  "fixture": "2 synthetic 64-frame tracks; 40x40 JPEG inputs; all temporary frames removed",
+  "canonical_sources": {
+    "image_metrics": "/home/jiahao/task/UniLIP/benchmark_csgo_v1.py",
+    "continuous_metrics": "/home/jiahao/task/UniLIP/benchmark_csgo_v1_conti.py",
+    "fvd_upstream": "/home/jiahao/task/UniLIP/third_party/PyTorch-Frechet-Video-Distance/fvd_metric/fvd.py"
+  },
+  "metrics": {
+    "PSNR": {
+      "canonical": 30.391431427001955,
+      "evaluator": 30.391431427001955,
+      "absolute_delta": 0.0
+    },
+    "SSIM": {
+      "canonical": 0.9059991240501404,
+      "evaluator": 0.9059991240501404,
+      "absolute_delta": 0.0
+    },
+    "Boundary_F1": {
+      "canonical": 0.9305149522722745,
+      "evaluator": 0.9305149522722745,
+      "absolute_delta": 0.0
+    },
+    "TWE": {
+      "canonical": 7.914990232104348,
+      "evaluator": 7.914990232104348,
+      "absolute_delta": 0.0
+    },
+    "TDE": {
+      "canonical": 7.42937519815233,
+      "evaluator": 7.42937519815233,
+      "absolute_delta": 0.0
+    },
+    "FID": {
+      "canonical": 104.06678009033203,
+      "evaluator": 104.06678009033203,
+      "absolute_delta": 0.0
+    }
+  },
+  "fvd_algorithm_ast_identical": {
+    "get_feature_detector": true,
+    "compute_feature_stats": true,
+    "compute_fvd": true
+  },
+  "fvd_i3d_weight_cache": "/home/jiahao/task/UniLIP/loaded_models",
+  "fvd_i3d_torchscript_loaded": true,
+  "fvd_synthetic_smoke": {
+    "status": "pass",
+    "device": "cuda",
+    "clips_per_side": 2,
+    "frames_per_clip": 16,
+    "frame_size": 224,
+    "score": 175.4575022920884
+  }
+}

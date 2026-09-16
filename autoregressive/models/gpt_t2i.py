@@ -417,14 +417,24 @@ class Transformer(nn.Module):
         condition: Optional[torch.Tensor] = None,
         control_strength: Optional[int] = 1
     ):
-        if idx is not None and cond_idx is not None: # training or naive inference
-            cond_embeddings,drop_ids = self.cls_embedding(cond_idx, train=self.training)
+        # Teacher forcing is selected by the inputs, not by ``self.training``.
+        # Validation also supplies both token inputs while the module is in eval
+        # mode; in that case CaptionEmbedder returns only its embedding tensor.
+        teacher_forcing = idx is not None and cond_idx is not None
+        if teacher_forcing: # training or naive inference
+            caption_result = self.cls_embedding(cond_idx, train=self.training)
+            if isinstance(caption_result, tuple):
+                cond_embeddings, drop_ids = caption_result
+            else:
+                cond_embeddings, drop_ids = caption_result, None
             cond_embeddings = cond_embeddings[:,:self.cls_token_num]
             token_embeddings = self.tok_embeddings(idx)
             if condition is not None:
                 condition_embeddings = self.adapter(condition)
                 condition_embeddings = self.adapter_mlp(condition_embeddings)
                 self.condition_token = self.condition_mlp(condition_embeddings,train=self.training, drop_ids=drop_ids)
+            else:
+                self.condition_token = None
             token_embeddings = torch.cat((cond_embeddings, token_embeddings), dim=1)
 
             h = self.tok_dropout(token_embeddings)
@@ -448,15 +458,16 @@ class Transformer(nn.Module):
             h = self.tok_dropout(token_embeddings)
             self.freqs_cis = self.freqs_cis
 
-        if self.training:
+        if teacher_forcing:
             freqs_cis = self.freqs_cis[:token_embeddings.shape[1]]
         else:
             freqs_cis = self.freqs_cis[input_pos]
         # transformer blocks
         for i, layer in enumerate(self.layers):
             if i%self.layer_internal == 0:
-                if self.training:
-                    h[:, self.cls_token_num-1:] = h[:, self.cls_token_num-1:] + self.condition_layers[i//self.layer_internal](self.condition_token)
+                if teacher_forcing:
+                    if self.condition_token is not None:
+                        h[:, self.cls_token_num-1:] = h[:, self.cls_token_num-1:] + self.condition_layers[i//self.layer_internal](self.condition_token)
                 else:
                     if len(input_pos)>1:
                         # h[:, -1:] = h[:, -1:] + self.condition_layers[i//self.layer_internal](self.condition_token[:,0:1])
@@ -469,7 +480,7 @@ class Transformer(nn.Module):
         h = self.norm(h)
         logits = self.output(h).float()
         
-        if self.training:
+        if teacher_forcing:
             logits = logits[:, self.cls_token_num - 1:].contiguous()
         # if we are given some desired targets also calculate the loss
         loss = None
