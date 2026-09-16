@@ -1,6 +1,6 @@
 # ControlAR CSGO Benchmark v2 Seen-10
 
-ControlAR 接入 `GENERATION`，生成 discrete 与 continuous 图像。本机项目环境为 `.venv`（Python 3.11、Torch 2.11 cu128）；官方 Canny-MR、VQ-16、DINO-small 权重及 DINO 配置已下载并通过固定版本校验。评测器使用 `/home/jiahao/miniconda3/envs/UniLIP/bin/python`。环境与资产详情见 [CSGO_SEEN10_ENV.md](CSGO_SEEN10_ENV.md)。新环境首次准备运行 `./scripts/setup_csgo_seen10.sh`。
+ControlAR 接入 `GENERATION`，生成 discrete 与 continuous 图像。本机项目环境为 `.venv`（Python 3.11、Torch 2.11 cu128）；官方 Canny-MR、VQ-16、DINO-small 权重及 DINO 配置已下载并通过固定版本校验。共享评测器目录为 `/home/jiahao/task/csgo_benchmark_v2_eval_general/`，使用 `/home/jiahao/miniconda3/envs/UniLIP/bin/python`。环境与资产详情见 [CSGO_SEEN10_ENV.md](CSGO_SEEN10_ENV.md)。新环境首次准备运行 `./scripts/setup_csgo_seen10.sh`。
 
 默认正式训练共 300,000 steps，每 60,000 steps 验证并保存一次，完整周期恰好得到 5 次验证和 5 个等距 checkpoint：`step_060000.pt`、`step_120000.pt`、`step_180000.pt`、`step_240000.pt`、`step_300000.pt`。`best.pt` 保存验证最优权重；`last.pt` 指向最近的完整训练状态。里程碑状态只序列化一次，`last.pt` 使用同文件系统链接，不重复占用 checkpoint 大小。
 
@@ -16,10 +16,12 @@ bash scripts/run_csgo_seen10.sh smoke --seed 0
 
 # Continuous 单帧 smoke：需要重新生成时换新输出根目录；原目录重跑会跳过已有图片
 CSGO_SMOKE_ROOT="$PWD/outputs/csgo_benchmark_v2_smoke/ControlAR/seed_0_continuous_rerun1"
-./.venv/bin/python infer_seen10.py --seed 0 --task continuous --smoke \
+SHARED_EVAL_DIR=/home/jiahao/task/csgo_benchmark_v2_eval_general
+UNILIP_PYTHON=/home/jiahao/miniconda3/envs/UniLIP/bin/python
+PYTHONDONTWRITEBYTECODE=1 ./.venv/bin/python infer_seen10.py --seed 0 --task continuous --smoke \
   --checkpoint outputs/csgo_benchmark_v2_smoke/ControlAR/seed_0/checkpoints/best.pt \
   --output-root "$CSGO_SMOKE_ROOT"
-/home/jiahao/miniconda3/envs/UniLIP/bin/python csgo_benchmark_v2_eval/run_eval.py \
+PYTHONDONTWRITEBYTECODE=1 "$UNILIP_PYTHON" "$SHARED_EVAL_DIR/run_eval.py" \
   smoke continuous --pred-root "$CSGO_SMOKE_ROOT" \
   --data-root /home/jiahao/task/UniLIP/data/csgo_benchmark_v2 --frame-only
 
@@ -48,4 +50,4 @@ bash scripts/run_csgo_seen10.sh train --seed 0 \
   --resume outputs/csgo_benchmark_v2_seen10/ControlAR/seed_0/checkpoints/last.pt
 ```
 
-`infer` 默认读取 validation 选出的 `best.pt`。中断后对同一 seed/task 重跑 infer，会校验并跳过有效图片，只补生成缺图；`eval` 默认使用 UniLIP Python，并拒绝覆写已有正式评测目录。
+`infer` 默认读取 validation 选出的 `best.pt`。中断后对同一 seed/task 重跑 infer，会校验并跳过有效图片，只补生成缺图；`eval` 默认使用共享评测器与 UniLIP Python，并拒绝覆写已有正式评测目录。

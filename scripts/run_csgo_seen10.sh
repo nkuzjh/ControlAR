@@ -3,9 +3,12 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PYTHON="${CONTROLAR_PYTHON:-${PROJECT_ROOT}/.venv/bin/python}"
-EVAL_PYTHON="${UNILIP_PYTHON:-/home/jiahao/miniconda3/envs/UniLIP/bin/python}"
+UNILIP_PYTHON="${UNILIP_PYTHON:-/home/jiahao/miniconda3/envs/UniLIP/bin/python}"
+SHARED_EVAL_DIR="${SHARED_EVAL_DIR:-${PROJECT_ROOT}/../csgo_benchmark_v2_eval_general}"
+EVALUATOR="${SHARED_EVAL_DIR}/run_eval.py"
 DATA_ROOT="${CSGO_BENCHMARK_V2_DATA:-/home/jiahao/task/UniLIP/data/csgo_benchmark_v2}"
 OUTPUT_BASE="${PROJECT_ROOT}/outputs/csgo_benchmark_v2_seen10/ControlAR"
+export PYTHONDONTWRITEBYTECODE=1
 
 if [[ $# -lt 1 ]]; then
   echo "Usage: $0 {smoke|train|infer|eval} [--seed N] [options...]" >&2
@@ -46,11 +49,38 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ ! -x "$PYTHON" ]]; then
-  echo "ControlAR Python environment is missing: $PYTHON" >&2
-  echo "Run scripts/setup_csgo_seen10.sh first." >&2
-  exit 1
-fi
+check_model_python() {
+  if [[ ! -x "$PYTHON" ]]; then
+    echo "ControlAR Python environment is missing: $PYTHON" >&2
+    echo "Run scripts/setup_csgo_seen10.sh first." >&2
+    return 1
+  fi
+}
+
+check_evaluator() {
+  if [[ ! -f "$EVALUATOR" ]]; then
+    echo "Shared CSGO evaluator is missing: $EVALUATOR" >&2
+    echo "Set SHARED_EVAL_DIR to a directory containing run_eval.py." >&2
+    return 1
+  fi
+  if [[ ! -x "$UNILIP_PYTHON" ]]; then
+    echo "UniLIP evaluator Python is missing: $UNILIP_PYTHON" >&2
+    return 1
+  fi
+}
+
+case "$ACTION" in
+  eval)
+    check_evaluator || exit 1
+    ;;
+  smoke)
+    check_evaluator || exit 1
+    check_model_python || exit 1
+    ;;
+  *)
+    check_model_python || exit 1
+    ;;
+esac
 cd "$PROJECT_ROOT"
 RUN_ROOT="${OUTPUT_BASE}/seed_${SEED}"
 SMOKE_ROOT="${CSGO_SMOKE_ROOT:-${PROJECT_ROOT}/outputs/csgo_benchmark_v2_smoke/ControlAR/seed_${SEED}}"
@@ -88,10 +118,10 @@ run_eval_task() {
   local output="${RUN_ROOT}/evaluation/${task_name}"
   if [[ "$smoke_mode" == "1" ]]; then
     pred_root="${SMOKE_ROOT}/${task_name}/gen_imgs"
-    "$EVAL_PYTHON" csgo_benchmark_v2_eval/run_eval.py smoke "$task_name" \
+    "$UNILIP_PYTHON" "$EVALUATOR" smoke "$task_name" \
       --pred-root "$pred_root" --data-root "$DATA_ROOT" --limit 1
   else
-    "$EVAL_PYTHON" csgo_benchmark_v2_eval/run_eval.py "$task_name" \
+    "$UNILIP_PYTHON" "$EVALUATOR" "$task_name" \
       --pred-root "$pred_root" --data-root "$DATA_ROOT" --output "$output"
   fi
 }
@@ -100,7 +130,6 @@ case "$ACTION" in
   smoke)
     TASK="discrete"
     echo "Smoke outputs: ${SMOKE_ROOT}"
-    [[ -x "$EVAL_PYTHON" ]] || { echo "UniLIP evaluator Python is missing: $EVAL_PYTHON" >&2; exit 1; }
     run_train "$SMOKE_ROOT" --smoke
     CHECKPOINT="${SMOKE_ROOT}/checkpoints/best.pt"
     run_infer "$SMOKE_ROOT" --smoke
