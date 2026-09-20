@@ -118,7 +118,7 @@ def early_summary(live):
     return {"status": "available", "observed_at": live.get("observed_at"), "tasks": live.get("tasks", {}), "projection_at_observation": live.get("projection_at_observation", {}), "gpu": live.get("gpu"), "processes": live.get("processes")}
 
 def make_report(summary):
-    lines = ["# CSGO 推理速度研究汇总", "", f"生成时间：{summary['generated_at']}", "", "## 前期正式推理", ""]; early = summary["early_inference"]
+    lines = ["# CSGO 推理速度研究汇总", "", f"生成时间：{summary['generated_at']}", "", "## 前期正式推理（初始观测）", ""]; early = summary["early_inference"]
     if early["status"] != "available": lines.append("live_before.json 缺失或不可解析，前期正式推理数据不可用。")
     else:
         for task, d in early.get("tasks", {}).items():
@@ -157,19 +157,37 @@ def main():
         bp, pp = d / "benchmark_results.json", d / "progress.jsonl"
         if not bp.is_file() and not pp.is_file(): continue
         result, error = read_json(bp); records, errors = read_progress(pp) if result is not None or pp.is_file() else ([], []); modes.append(mode_summary(d, result, error, records, errors))
-    baselines = [m for m in modes if m["benchmark_status"] == "complete" and m["mode"] == "eager" and num(m.get("batch_size")) == 1]; baseline = {task: baselines[0]["tasks"][task]["seconds_per_image"] for task in TARGETS if baselines and baselines[0]["tasks"][task]["seconds_per_image"] is not None}
+    baselines = [m for m in modes if m["benchmark_status"] == "complete" and m["mode"] == "eager" and num(m.get("batch_size")) == 1]
+    preferred_baseline = next(
+        (m for m in baselines if m["directory"] == "eager_b1_current"),
+        baselines[-1] if baselines else None,
+    )
+    baseline = {
+        task: preferred_baseline["tasks"][task]["seconds_per_image"]
+        for task in TARGETS
+        if preferred_baseline and preferred_baseline["tasks"][task]["seconds_per_image"] is not None
+    }
     successful, eligible = [], {task: [] for task in TARGETS}
+    current_replacements = {"eager": "eager_b1_current", "compiled_b1": "compiled_b1_current"}
+    mode_directories = {m["directory"] for m in modes}
     for m in modes:
+        include_in_table = not (
+            m["directory"] in current_replacements
+            and current_replacements[m["directory"]] in mode_directories
+        )
         for task, t in m["tasks"].items():
             if m["benchmark_status"] != "complete" or t["status"] != "complete": continue
-            speed = baseline.get(task) / t["seconds_per_image"] if task in baseline else None; successful.append({"mode": m["mode"], "batch": m.get("batch_size") or "—", "task": task, "count": t["count"], "total": fmt(t["total_seconds"]), "spi": fmt(t["seconds_per_image"]), "full": fmt(t["full_batch_seconds"]), "warm": fmt(t["warmup_seconds"]), "alloc": fmt(t["torch_allocated_peak_gib"]), "reserved": fmt(t["torch_reserved_peak_gib"]), "hours": f"{t['projected_target']}={fmt(t['projected_hours'])}", "speed": fmt(speed) if speed is not None else "—"}); eligible[task].append((m["directory"], t.get("observed_sample_ids", []), t["sample_id_consistency"]["status"]))
+            speed = baseline.get(task) / t["seconds_per_image"] if task in baseline else None
+            if include_in_table:
+                successful.append({"mode": m["mode"], "batch": m.get("batch_size") or "—", "task": task, "count": t["count"], "total": fmt(t["total_seconds"]), "spi": fmt(t["seconds_per_image"]), "full": fmt(t["full_batch_seconds"]), "warm": fmt(t["warmup_seconds"]), "alloc": fmt(t["torch_allocated_peak_gib"]), "reserved": fmt(t["torch_reserved_peak_gib"]), "hours": f"{t['projected_target']}={fmt(t['projected_hours'])}", "speed": fmt(speed) if speed is not None else "—"})
+            eligible[task].append((m["directory"], t.get("observed_sample_ids", []), t["sample_id_consistency"]["status"]))
     cross = {"status": "insufficient_modes", "comparisons": []}
     cross_states = []
     for task, entries in eligible.items():
         if len(entries) < 2: continue
         same = all(e[1] == entries[0][1] for e in entries[1:]); known = entries[0][2] == "consistent" and all(e[2] == "consistent" for e in entries[1:]); state = "consistent" if same and known else ("inconsistent" if not same else "unknown"); cross_states.append(state); cross["comparisons"].append({"task": task, "reference": entries[0][0], "modes": [e[0] for e in entries], "same_observed_ids": same, "all_id_checks_consistent": known})
     if cross_states: cross["status"] = "inconsistent" if "inconsistent" in cross_states else ("unknown" if "unknown" in cross_states else "consistent")
-    summary = {"generated_at": datetime.now(timezone.utc).isoformat(), "sources": ["live_before.json", "*/benchmark_results.json", "*/progress.jsonl"], "projection_targets": {"discrete20000": 20000, "continuous12800": 12800}, "early_inference": early_summary(live), "early_parse_error": live_error, "modes": modes, "successful_results": successful, "eager_b1_baseline_seconds_per_image": baseline, "cross_mode_sample_id_consistency": cross}
+    summary = {"generated_at": datetime.now(timezone.utc).isoformat(), "sources": ["live_before.json", "*/benchmark_results.json", "*/progress.jsonl"], "projection_targets": {"discrete20000": 20000, "continuous12800": 12800}, "early_inference": early_summary(live), "early_parse_error": live_error, "modes": modes, "successful_results": successful, "eager_b1_baseline_directory": preferred_baseline["directory"] if preferred_baseline else None, "eager_b1_baseline_seconds_per_image": baseline, "cross_mode_sample_id_consistency": cross}
     OUT.mkdir(parents=True, exist_ok=True); (OUT / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"); (OUT / "REPORT.md").write_text(make_report(summary), encoding="utf-8")
 
 if __name__ == "__main__": main()

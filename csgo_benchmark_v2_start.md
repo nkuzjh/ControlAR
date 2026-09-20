@@ -178,3 +178,56 @@ de_train
 - 尚未完成的唯一真实阻塞项。
 
 不要只给建议或伪代码；需要把当前项目改到能够实际运行。
+
+七、ControlAR 编译批量推理方案（2026-09-20）
+
+目标是在不停止或改写当前 eager batch=1 正式推理目录的前提下，增加一条显式启用的
+`torch.compile + CUDA Graph + batch=16` 推理路径，并把新结果写入独立目录。新路径复用
+同一个验证最优 checkpoint、BF16 GPT、FP32 VQ、448×448 分辨率、CFG=4、temperature=1、
+top-k=2000 和 top-p=1，不重新训练模型。
+
+兼容与安全合同：
+
+1. `infer_seen10.py` 默认 `--inference-engine eager`。不传新参数时继续使用原逐样本
+   `generate()`、逐样本 SHA256 seed 和 batch=1；已有启动命令保持兼容。
+2. 只有显式传入 `--inference-engine compiled --batch-size 16` 才启用编译批量路径。
+3. 编译结果必须写入新的 output root；不得与正在运行的
+   `outputs/csgo_benchmark_v2_seen10/ControlAR/seed_0` 混合。
+4. 新目录的 `inference_manifest.json` 记录 engine、batch size、编译模式、固定 manifest
+   分组和 batch seed 策略。旧 manifest 没有这些字段时只允许按 legacy eager batch=1 继续。
+5. 编译路径始终按照 benchmark manifest 的原始顺序构造固定批次。断点恢复时完整重算
+   含缺失文件的固定批次，只保存缺失项；已有 JPEG 先验证且不覆盖。尾批通过复制最后一个
+   条件 padding 到固定 batch size，padding 结果不写出，从而避免尾批触发另一套动态图编译。
+6. JPEG 先写同目录临时文件，再以 `os.replace` 原子提交，避免中断时留下半写入的正式文件。
+7. 编译采样当前只接受 `top_p=1.0` 和 `cfg_scale>1`；不满足时直接报错，禁止静默改变采样。
+
+现有命令继续有效，行为保持 eager batch=1：
+
+```bash
+/home/jiahao/task/ControlAR/.venv/bin/python infer_seen10.py \
+  --seed 0 \
+  --data-root /home/jiahao/task/UniLIP/data/csgo_benchmark_v2 \
+  --output-root /home/jiahao/task/ControlAR/outputs/csgo_benchmark_v2_seen10/ControlAR/seed_0 \
+  --task all
+```
+
+新的编译 batch=16 命令如下。新 output root 中没有 checkpoint，因此必须显式指向原训练
+目录的验证最优 checkpoint：
+
+```bash
+cd /home/jiahao/task/ControlAR
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=4 \
+  .venv/bin/python infer_seen10.py \
+  --seed 0 \
+  --data-root /home/jiahao/task/UniLIP/data/csgo_benchmark_v2 \
+  --checkpoint /home/jiahao/task/ControlAR/outputs/csgo_benchmark_v2_seen10/ControlAR/seed_0/checkpoints/best.pt \
+  --output-root /home/jiahao/task/ControlAR/outputs/csgo_benchmark_v2_seen10_compiled_b16/ControlAR/seed_0 \
+  --task all \
+  --inference-engine compiled \
+  --batch-size 16
+```
+
+固定32张样本的共享GPU实测中，compiled batch=16 的离散/连续端到端耗时分别约为
+1.03/1.02秒每张，完整32,800张线性外推约9.34小时，进程峰值 reserved 显存约8.92 GiB；
+首次编译预热约52秒。该数值是容量规划依据，不是完成时间保证。新方法实现和静态验证后
+不自动启动，等待人工执行上述命令。

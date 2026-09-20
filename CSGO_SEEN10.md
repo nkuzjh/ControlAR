@@ -32,6 +32,33 @@ bash scripts/run_csgo_seen10.sh eval --seed 0 --task discrete
 bash scripts/run_csgo_seen10.sh eval --seed 0 --task continuous
 ```
 
+## 编译批量推理
+
+`infer_seen10.py` 默认继续使用原来的 eager batch=1 路径，因此上述正式推理命令和已经存在的
+输出目录都保持兼容。编译路径必须显式指定，并写入独立的输出根目录：
+
+```bash
+cd /home/jiahao/task/ControlAR
+OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=4 \
+  .venv/bin/python infer_seen10.py \
+  --seed 0 \
+  --data-root /home/jiahao/task/UniLIP/data/csgo_benchmark_v2 \
+  --checkpoint /home/jiahao/task/ControlAR/outputs/csgo_benchmark_v2_seen10/ControlAR/seed_0/checkpoints/best.pt \
+  --output-root /home/jiahao/task/ControlAR/outputs/csgo_benchmark_v2_seen10_compiled_b16/ControlAR/seed_0 \
+  --task all \
+  --inference-engine compiled \
+  --batch-size 16
+```
+
+中断后使用同一条命令恢复。编译路径按 manifest 顺序固定分成 16 张一组；只要某组有缺图，
+就用同一批次 seed 重算整组并只写入缺失图片。有效的已有 JPEG 会校验并保留，尾批会补齐到
+16 张但不写出补齐项。输出 manifest 会记录推理引擎、batch size、编译模式和 seed 策略，并
+拒绝将 compiled 结果混入旧 eager 目录。
+
+共享 GPU 上固定 32 张样本的实测为离散约 1.03 秒/张、连续约 1.02 秒/张；完整 32,800 张
+线性外推约 9.34 小时，进程峰值 reserved 显存约 8.92 GiB，首次编译预热约 52 秒。原始结果
+见 `outputs/inference_speed_study/REPORT.md`。本次只完成实现和静态验收，不自动启动该命令。
+
 Smoke 输出默认在 `outputs/csgo_benchmark_v2_smoke/ControlAR/seed_<seed>/`，与正式结果隔离。Smoke 不覆盖已有目录；重复运行时指定新的根目录：
 
 ```bash
