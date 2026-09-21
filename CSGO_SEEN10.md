@@ -55,6 +55,17 @@ OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 TORCHINDUCTOR_COMPILE_THREADS=4 \
 16 张但不写出补齐项。输出 manifest 会记录推理引擎、batch size、编译模式和 seed 策略，并
 拒绝将 compiled 结果混入旧 eager 目录。
 
+编译推理完成后，用 `--run-root` 将正式评测指向同一个独立输出根目录。省略此参数时，`eval`
+仍默认读取原来的 `outputs/csgo_benchmark_v2_seen10/ControlAR/seed_<seed>/`：
+
+```bash
+bash scripts/run_csgo_seen10.sh eval --seed 0 --task all \
+  --run-root /home/jiahao/task/ControlAR/outputs/csgo_benchmark_v2_seen10_compiled_b16/ControlAR/seed_0
+```
+
+评测预测从该根目录的 `discrete/gen_imgs/` 和 `continuous/gen_imgs/` 读取，正式指标写入其
+`evaluation/` 子目录。
+
 共享 GPU 上固定 32 张样本的实测为离散约 1.03 秒/张、连续约 1.02 秒/张；完整 32,800 张
 线性外推约 9.34 小时，进程峰值 reserved 显存约 8.92 GiB，首次编译预热约 52 秒。原始结果
 见 `outputs/inference_speed_study/REPORT.md`。本次只完成实现和静态验收，不自动启动该命令。

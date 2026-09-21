@@ -11,7 +11,7 @@ OUTPUT_BASE="${PROJECT_ROOT}/outputs/csgo_benchmark_v2_seen10/ControlAR"
 export PYTHONDONTWRITEBYTECODE=1
 
 if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 {smoke|train|infer|eval} [--seed N] [options...]" >&2
+  echo "Usage: $0 {smoke|train|infer|eval} [--seed N] [--run-root PATH] [options...]" >&2
   exit 2
 fi
 
@@ -20,6 +20,7 @@ shift
 SEED=0
 TASK="all"
 CHECKPOINT=""
+RUN_ROOT_OVERRIDE=""
 FORWARD_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -41,6 +42,16 @@ while [[ $# -gt 0 ]]; do
       [[ $# -ge 2 ]] || { echo "--checkpoint needs a value" >&2; exit 2; }
       CHECKPOINT="$2"
       shift 2
+      ;;
+    --run-root)
+      [[ $# -ge 2 && -n "$2" ]] || { echo "--run-root needs a path" >&2; exit 2; }
+      RUN_ROOT_OVERRIDE="$2"
+      shift 2
+      ;;
+    --run-root=*)
+      RUN_ROOT_OVERRIDE="${1#*=}"
+      [[ -n "$RUN_ROOT_OVERRIDE" ]] || { echo "--run-root needs a path" >&2; exit 2; }
+      shift
       ;;
     *)
       FORWARD_ARGS+=("$1")
@@ -83,6 +94,9 @@ case "$ACTION" in
 esac
 cd "$PROJECT_ROOT"
 RUN_ROOT="${OUTPUT_BASE}/seed_${SEED}"
+if [[ -n "$RUN_ROOT_OVERRIDE" ]]; then
+  RUN_ROOT="$RUN_ROOT_OVERRIDE"
+fi
 SMOKE_ROOT="${CSGO_SMOKE_ROOT:-${PROJECT_ROOT}/outputs/csgo_benchmark_v2_smoke/ControlAR/seed_${SEED}}"
 
 run_train() {
