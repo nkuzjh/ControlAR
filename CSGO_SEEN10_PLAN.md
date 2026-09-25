@@ -176,7 +176,7 @@ PEFT 不复用原 aligned 的 `_freeze_aligned_inactive_parameters`，以免意�
 
 ## 8. 跨服务器迁移接入（2026-09-25）
 
-参考 X-VLA、OpenVLA-OFT、RDT 的机器路径与实验配置分离方式，继续支持旧命令，并增加独立环境准备、路径打印和本地资产检查。定位项目的模型/head/优化配置没有移植到本项目。ControlAR 的生成评测依赖单独准备 `.venv-eval`，仅使用共享 evaluator，不回退到项目内旧指标副本。
+参考 X-VLA、OpenVLA-OFT、RDT 的机器路径与实验配置分离方式，继续支持旧命令，并增加独立环境准备、路径打印和本地资产检查。定位项目的模型/head/优化配置没有移植到本项目。迁移接入最初提供项目 `.venv-eval`；当前评测默认使用共享 evaluator 自身 `.venv`，其代码及环境由独立仓库管理，不回退到项目内旧指标副本。
 
 | 文件 | 本轮作用 |
 | --- | --- |
@@ -192,3 +192,11 @@ PEFT 不复用原 aligned 的 `_freeze_aligned_inactive_parameters`，以免意�
 三个 canonical 配置 JSON、数据读取/预处理、模型、LoRA、采样公式和评测指标实现均未改动。新训练保存实际源码哈希和解析后的真实数据路径。旧同路径恢复的兼容操作需要 `--allow-legacy-source-resume`；跨路径旧 checkpoint/旧预测续写仍不支持，禁止改写其 identity 来绕过检查。
 
 本轮验收：18 项 CPU/脚本用例、实际复制 metadata 后的 aligned/PEFT 检查、真实历史 aligned/PEFT identity 的显式源码转换核验、当前环境 CPU 导入、官方权重完整哈希和脚本语法检查。未重新安装环境或执行训练/推理/评测任务，未运行 GPU smoke。新服务器稳定版依赖的实际安装、独立 `.venv-eval`、BF16/compile 硬件兼容和完整指标缓存仍需在目标服务器验证。证据见 [迁移验收报告](outputs/csgo_seen10_portability_checks/20260925_005013/ACCEPTANCE.md)，使用命令见主文档第 4 节。
+
+## 9. 共享评测器环境选择
+
+评测解释器改为 CLI → 所选共享评测器目录内 `.venv/bin/python` → 显式 `EVAL_PYTHON` / `UNILIP_PYTHON` → 未设置变量时的默认 UniLIP Python。缺少可执行候选时评测直接报错；无自动安装，无 ControlAR `.venv-eval` / `.venv` 回退。显式错误路径不会静默替换。`--eval-root` 同时决定代码目录及默认环境目录。
+
+评测专用选择逻辑位于 `csgo_seen10/eval_runtime.py`，runner 与只读路径工具统一调用。训练身份所绑定的 `paths.py` 及其他训练源码、配置、兼容 SHA 表不变，避免仅调整评测启动方式就使已有训练 checkpoint 的恢复身份发生变化。`paths.py` 内原有解释器 helper 保留供历史代码使用，当前 runner 不再调用它。
+
+验收：17 项评测解释器与 runner 用例通过，连同原环境/资产脚本用例共 23 项通过；覆盖 CLI、共享环境、显式变量、默认 UniLIP、缺失/不可执行/断链、空格路径及训练不依赖评测环境。只读 `eval --print-paths` 已确认当前默认选择 `/home/jiahao/task/csgo_benchmark_v2_eval_general/.venv/bin/python`。训练源码 SHA、Shell/Python 语法和 diff 检查通过；未安装环境、未启动训练或评测。

@@ -121,12 +121,12 @@ legacy 默认单卡 micro=1、无累计，6 epochs = 300,000 updates；每 60,00
 bash scripts/setup_csgo_seen10.sh --env-only
 ./.venv/bin/python scripts/download_csgo_seen10_assets.py
 
-# 生成评测需要额外依赖，放入独立 .venv-eval，避免改变训练依赖。
-bash scripts/setup_csgo_seen10.sh --eval-only
+# 共享评测器单独拉取代码、管理环境；已准备过时无需重复安装。
+# 在新服务器按共享评测器 README 执行，例如：
+bash ../csgo_benchmark_v2_eval_general/setup_env.sh
 
 # 只读检查，不安装、不下载，也不初始化 CUDA。
 bash scripts/setup_csgo_seen10.sh --check
-bash scripts/setup_csgo_seen10.sh --eval-only --check
 ./.venv/bin/python scripts/download_csgo_seen10_assets.py --check
 
 # 在目标计算节点另行验证 CUDA/实际 GPU；会执行小矩阵检查。
@@ -135,7 +135,7 @@ bash scripts/setup_csgo_seen10.sh --check-cuda
 
 不加参数的 `setup_csgo_seen10.sh` 仍为训练环境与模型资产的一键准备。已有兼容环境优先保留，不自动替换已安装的 nightly PyTorch；新环境从 PATH 选择兼容 Python，必要时用 Conda 创建项目内解释器。可用 `CONTROLAR_BOOTSTRAP_PYTHON=/path/to/python3.11` 显式指定，不再默认克隆另一项目环境。显式 `CONTROLAR_CLONE_FROM` 仍用于确实需要复制某个已有 Conda 环境的情况。
 
-新环境默认采用稳定 cu128 PyTorch/torchvision 配对。后端选项见 `bash scripts/setup_csgo_seen10.sh --help`；CPU 后端只适合配置检查，正式 ControlAR BF16 训练/推理仍需支持的 NVIDIA GPU 与驱动。环境选择不改变实验 batch、学习率或模型配置，也不承诺跨 GPU/库版本逐位一致。`--check` 执行关键包 CPU 导入及本地资产哈希检查（`--env-only` / `--eval-only` 时不检查模型资产），确认 CUDA 未初始化；它不能替代新服务器的 `--check-cuda` 和独立 smoke。评测环境选择 Python 3.11–3.12，以兼容共享 evaluator 固定的 [SciPy 1.17.0](https://pypi.org/project/scipy/1.17.0/)；训练环境支持 3.10–3.12。新环境的 PyTorch 2.7.1 / torchvision 0.22.1 配对依据 [PyTorch 官方版本表](https://pytorch.org/get-started/previous-versions/)。
+新环境默认采用稳定 cu128 PyTorch/torchvision 配对。后端选项见 `bash scripts/setup_csgo_seen10.sh --help`；CPU 后端只适合配置检查，正式 ControlAR BF16 训练/推理仍需支持的 NVIDIA GPU 与驱动。环境选择不改变实验 batch、学习率或模型配置，也不承诺跨 GPU/库版本逐位一致。`--check` 执行关键包 CPU 导入及本地资产哈希检查（`--env-only` / `--eval-only` 时不检查模型资产），确认 CUDA 未初始化；它不能替代新服务器的 `--check-cuda` 和独立 smoke。共享评测环境由其独立仓库的 `setup_env.sh` 和 README 管理；ControlAR 训练环境支持 Python 3.10–3.12。新环境的 PyTorch 2.7.1 / torchvision 0.22.1 配对依据 [PyTorch 官方版本表](https://pytorch.org/get-started/previous-versions/)。
 
 首次接入的已验证环境记录：Python 3.11.14、Torch `2.11.0.dev20260124+cu128`、torchvision `0.25.0.dev20260124+cu128`、CUDA runtime 12.8、包含 `sm_120`；RTX PRO 6000 Blackwell，彼时驱动 580.173.02 / 系统 CUDA 13.0。依赖 import、CUDA 可用性和 4×4 矩阵计算曾通过。这是历史验收记录，不代表新服务器或未来环境自动具有相同版本。
 
@@ -160,16 +160,27 @@ workspace/
   csgo_benchmark_v2_eval_general/
 ```
 
-路径优先级是 **CLI → 环境变量 → 配置中的可用旧默认路径 → checkout 相对默认值**。自定义或显式给出的错误路径不会被自动替换。相对路径都以 ControlAR 根目录为基准，与调用 shell 的当前目录无关。三个 canonical JSON 保持原字节，机器路径在运行时解析，不修改实验含义。
+数据与评测器目录的路径优先级是 **CLI → 环境变量 → 配置中的可用旧默认路径 → checkout 相对默认值**；评测 Python 使用下述单独优先级。自定义或显式给出的错误路径不会被自动替换。相对路径都以 ControlAR 根目录为基准，与调用 shell 的当前目录无关。三个 canonical JSON 保持原字节，机器路径在运行时解析，不修改实验含义。
 
 | 用途 | 默认 | 环境变量 | runner CLI |
 | --- | --- | --- | --- |
 | 数据 | 原配置旧路径存在时保留；否则 `../UniLIP/data/csgo_benchmark_v2` | `CSGO_DATA_ROOT`，兼容 `CSGO_BENCHMARK_V2_DATA`、`DATA_ROOT` | `--data-root` |
 | 共享评测器 | `../csgo_benchmark_v2_eval_general` | `SHARED_EVAL_DIR`，兼容 `CSGO_EVAL_ROOT` | `--eval-root` |
-| 评测 Python | `.venv-eval/bin/python`；旧 UniLIP Python 存在时保留为后备；否则 `.venv/bin/python` | `EVAL_PYTHON`，兼容 `UNILIP_PYTHON` | `--eval-python`，兼容 `--unilip-python` |
+| 评测 Python | 所选共享评测器目录内 `.venv/bin/python` | 仅当评测器自身环境不可用时使用 `EVAL_PYTHON`，其次 `UNILIP_PYTHON`；均未设置时默认旧 UniLIP | `--eval-python`，兼容 `--unilip-python`，最高优先级 |
 | 训练/推理 Python | `.venv/bin/python` | `CONTROLAR_PYTHON` | — |
 | 标准库路径检查 Python | PATH 中的 python3/python | `CONTROLAR_PATHS_PYTHON` | — |
 | GPU 进程数 | 1；原 aligned 固定单卡，PEFT 保持有效 batch128 | `NPROC_PER_NODE` | — |
+
+评测解释器的准确优先级为：
+
+1. CLI `--eval-python` / `--unilip-python`。
+2. **最终选定的共享评测器目录**下 `.venv/bin/python`（跟随 `--eval-root` / `SHARED_EVAL_DIR` / `CSGO_EVAL_ROOT`）。
+3. 显式设置的 `EVAL_PYTHON`，兼容 `UNILIP_PYTHON`；这两个变量不会覆盖已就绪的评测器自身环境。
+4. 两个变量均未设置时，默认 `/home/jiahao/miniconda3/envs/UniLIP/bin/python`。
+
+运行评测时，所选解释器必须是可执行文件。CLI 或显式环境变量指定的解释器无效时明确报错，不静默改用其他解释器；共享评测器自身环境缺失、断链或不可执行时才尝试后续候选。候选均不可用则 `eval` / `smoke` 报错，不回退到 `ControlAR/.venv-eval` 或训练 `.venv`，也不自动安装环境。训练和推理本身不依赖评测环境就绪。
+
+此前 `setup_csgo_seen10.sh --eval-only` 保留为历史兼容选项，仍创建 `ControlAR/.venv-eval`，但它不再被自动选择。若确实要用该环境，应显式传 `--eval-python .venv-eval/bin/python`。默认流程改为共享评测器独立准备环境。
 
 多个别名同时设置时按表内从左到右优先；清理不再使用的环境变量。官方 GPT/VQ/DINO 仍放在项目内的固定相对位置；整个 checkout 可换位置，单独数据目录则用显式覆盖。新服务器本地生成的模型和结果沿用相同训练、推理、评测命令。
 
@@ -177,7 +188,7 @@ workspace/
 # 非默认布局时，只需设置本机路径。变量应同时用于训练、推理和评测。
 export CSGO_DATA_ROOT=/actual/path/to/csgo_benchmark_v2
 export SHARED_EVAL_DIR=/actual/path/to/csgo_benchmark_v2_eval_general
-# 可选：使用已准备好的专门评测解释器。
+# 可选：评测器自身 .venv 不可用时的后备解释器。
 # export EVAL_PYTHON=/actual/path/to/eval-env/bin/python
 
 # 无需模型环境或 GPU，只打印解析结果，不创建 run、不加载 checkpoint。
@@ -198,7 +209,7 @@ bash scripts/run_csgo_seen10.sh eval \
 
 本次路径接入修改了训练入口源码，因此历史同路径 checkpoint 的源码 SHA 与当前版本不同。默认恢复仍严格拒绝；仅对本次明确登记的旧版本，可在原数据路径、配置、权重等全部一致时，在原 `train ... --resume <checkpoint>` 命令末尾追加 `--allow-legacy-source-resume`。该选项检查已登记的旧/新源码完整 SHA 集合并写入兼容审计，新 checkpoint 保存当前真实源码身份；它不能跨路径迁移，也不能跳过任意代码变化。无需该选项的新版本同路径恢复沿用第 5 节命令。原运行中的训练进程不会被停止或重启。
 
-本轮迁移实现与只读验收记录见 [迁移验收报告](outputs/csgo_seen10_portability_checks/20260925_005013/ACCEPTANCE.md)。本机已通过 CPU 导入与资产检查，独立 `.venv-eval` 和新服务器环境尚未实际安装；完整硬件与 GPU smoke 仍由目标服务器执行。
+本轮迁移实现与只读验收记录见 [迁移验收报告](outputs/csgo_seen10_portability_checks/20260925_005013/ACCEPTANCE.md)。该历史验收通过 CPU 导入与资产检查，当时未安装项目 `.venv-eval`。当前默认改用共享评测器自身 `.venv`；环境由共享仓库独立管理，完整硬件与 GPU smoke 仍由目标服务器执行。
 
 ## 5. 直接执行命令
 

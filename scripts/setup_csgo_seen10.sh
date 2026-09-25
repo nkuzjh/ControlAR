@@ -15,7 +15,9 @@ Usage: bash scripts/setup_csgo_seen10.sh [--env-only | --eval-only] [--check | -
 
 Default: prepare the project-local .venv and verify/download pinned official model assets.
 --env-only   Prepare only the training/inference environment; skip model assets.
---eval-only  Prepare the shared evaluator in a separate .venv-eval; skip model assets.
+--eval-only  Legacy opt-in: prepare ControlAR/.venv-eval; skip model assets.
+             This is no longer selected automatically by evaluation. Prefer the
+             shared evaluator's setup_env.sh and its own .venv.
              Uses Python 3.11-3.12 for the evaluator's scipy==1.17.0.
 --check      Inspect the selected environment and, by default, hash all local assets.
              CPU imports only; no installation, downloads, writes, or CUDA initialization.

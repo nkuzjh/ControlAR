@@ -179,7 +179,7 @@ fi
 if [[ -z "$PATHS_PYTHON" ]]; then
   PATHS_PYTHON="${PROJECT_ROOT}/.venv/bin/python"
 fi
-PATH_ARGS=(--experiment "$EXPERIMENT" --seed "$SEED")
+PATH_ARGS=(--action "$ACTION" --experiment "$EXPERIMENT" --seed "$SEED")
 [[ -z "$DATA_ROOT_OVERRIDE" ]] || PATH_ARGS+=(--data-root "$DATA_ROOT_OVERRIDE")
 [[ -z "$EVAL_ROOT_OVERRIDE" ]] || PATH_ARGS+=(--eval-root "$EVAL_ROOT_OVERRIDE")
 [[ -z "$EVAL_PYTHON_OVERRIDE" ]] || PATH_ARGS+=(--eval-python "$EVAL_PYTHON_OVERRIDE")
@@ -192,7 +192,7 @@ mapfile -t RESOLVED_PATHS <<< "$PATH_VALUES"
 PYTHON="${RESOLVED_PATHS[0]}"
 DATA_ROOT="${RESOLVED_PATHS[1]}"
 SHARED_EVAL_DIR="${RESOLVED_PATHS[2]}"
-UNILIP_PYTHON="${RESOLVED_PATHS[3]}"
+EVAL_RUNTIME_PYTHON="${RESOLVED_PATHS[3]}"
 RESOLVED_RUN_ROOT="${RESOLVED_PATHS[4]}"
 EVALUATOR="${SHARED_EVAL_DIR}/run_eval.py"
 EVAL_CONFIG="${SHARED_EVAL_DIR}/benchmark_v2.yaml"
@@ -215,8 +215,8 @@ check_evaluator() {
     echo "Shared evaluator config is missing: $EVAL_CONFIG" >&2
     return 1
   fi
-  if [[ ! -x "$UNILIP_PYTHON" ]]; then
-    echo "Evaluator Python is missing: $UNILIP_PYTHON; prepare it with scripts/setup_csgo_seen10.sh --eval-only or set EVAL_PYTHON." >&2
+  if [[ ! -f "$EVAL_RUNTIME_PYTHON" || ! -x "$EVAL_RUNTIME_PYTHON" ]]; then
+    echo "Evaluator Python is missing: $EVAL_RUNTIME_PYTHON; prepare it in the shared evaluator .venv or set EVAL_PYTHON." >&2
     return 1
   fi
 }
@@ -356,10 +356,10 @@ run_eval_task() {
     output="${ACTIVE_RUN_ROOT}/evaluation/${task_name}"
   fi
   if [[ "$smoke_mode" == "1" ]]; then
-    "$UNILIP_PYTHON" "$EVALUATOR" smoke "$task_name" \
+    "$EVAL_RUNTIME_PYTHON" "$EVALUATOR" smoke "$task_name" \
       --pred-root "$pred_root" --data-root "$DATA_ROOT" --config "$EVAL_CONFIG" --limit 1
   else
-    "$UNILIP_PYTHON" "$EVALUATOR" "$task_name" \
+    "$EVAL_RUNTIME_PYTHON" "$EVALUATOR" "$task_name" \
       --pred-root "$pred_root" --data-root "$DATA_ROOT" --config "$EVAL_CONFIG" --output "$output"
   fi
 }
