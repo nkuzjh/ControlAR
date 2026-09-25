@@ -201,7 +201,7 @@ bash scripts/run_csgo_seen10.sh eval \
 ./.venv/bin/python scripts/validate_csgo_seen10_peft.py
 ```
 
-共享 evaluator 必须另行同步完整目录及 `benchmark_v2.yaml`；没有回退到项目内旧指标实现。评测权重与 ControlAR 模型权重分开准备：在通用评测器目录运行 `bash setup_env.sh`，对 AlexNet（LPIPS）、Inception（FID）、I3D（FVD）逐项优先复用 UniLIP 的 `loaded_models`，缺失时才下载至评测器自己的 `loaded_models`；已有统一环境可使用 `--weights-only`。正式评测按相同优先级读取并核对权重哈希，缺失时报错，不再隐式下载或依赖全局 Torch Hub 缓存。FVD 显式 CLI、`UNILIP_FVD_CACHE_DIR` 和 YAML 路径仍作为优先候选，缺少实际 I3D 文件时继续查找评测器本地副本；YAML 相对路径以配置文件目录为基准。当前 LPIPS 使用 AlexNet，无需 VGG 权重。离线服务器需预先准备这些 metric 权重；详见共享 evaluator README。ControlAR 模型下载脚本的 `HF_ENDPOINT` 和官方固定 revision/SHA 校验保持不变。
+共享 evaluator 必须另行同步完整目录及 `benchmark_v2.yaml`；没有回退到项目内旧指标实现。评测权重与 ControlAR 模型权重分开准备：在通用评测器目录运行 `bash setup_env.sh`，对 AlexNet（LPIPS）、Inception（FID）、I3D（FVD）逐项按用户 Torch 缓存（默认 `~/.cache/torch/hub/checkpoints`，支持 `TORCH_HOME`／`XDG_CACHE_HOME`）→ UniLIP `loaded_models` → 评测器 `loaded_models` 查找，均无有效副本时才下载至评测器自己的 `loaded_models`；已有统一环境可使用 `--weights-only`。正式评测按相同优先级读取并核对权重哈希，缺失时报错，不在评测时隐式下载。FVD 显式 CLI、`UNILIP_FVD_CACHE_DIR` 和 YAML 路径排在用户 Torch 缓存之后、默认 UniLIP 路径之前，缺少实际 I3D 文件时继续查找评测器本地副本；YAML 相对路径以配置文件目录为基准。当前 LPIPS 使用 AlexNet，无需 VGG 权重。离线服务器需预先准备这些 metric 权重；详见共享 evaluator README。ControlAR 模型下载脚本的 `HF_ENDPOINT` 和官方固定 revision/SHA 校验保持不变。
 
 ### 4.3 恢复边界
 
