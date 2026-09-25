@@ -21,6 +21,7 @@ import train_seen10 as common
 from csgo_seen10.data import Seen10GenerationDataset, read_benchmark_rows
 from csgo_seen10.model import Seen10GenerationModel, build_gpt, load_checkpoint, load_official_gpt_weights
 from csgo_seen10.peft import audit_parameters, build_optimizer, configure_trainable, inject_lora
+from csgo_seen10.peft_artifact_contract import PEFT_CHECKPOINT_STEPS
 from csgo_seen10.paths import data_root as resolve_data_root
 from csgo_seen10.source_compat import check_resume_identity
 
@@ -29,7 +30,7 @@ ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "configs" / "csgo_seen10_exp32gen_aligned_peft.json"
 EXPERIMENT = "csgo_seen10_exp32gen_aligned_peft"
 FORMAT = EXPERIMENT + "_v1"
-MILESTONES = (3900, 7800, 11700, 15600, 19500)
+MILESTONES = PEFT_CHECKPOINT_STEPS
 
 
 def parse_args() -> argparse.Namespace:

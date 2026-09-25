@@ -104,7 +104,7 @@ world_size × micro_batch × gradient_accumulation = 1 × 1 × 128 = 128
 
 loss 在 backward 前除以累计次数；scheduler 和 global step 只在 optimizer update 后更新。CFG 分支和内部 token 不重复计作源样本。原 aligned 代码固定 micro=1、accumulation=128；不能直接传 micro=8/16。独立 PEFT 入口默认 micro=8、accumulation=16；两者允许覆盖，只要求 world size、micro、累计均为正整数且乘积为 128。此规则不改变正在运行的原 aligned 实验。
 
-完整 5,000 条 validation 和保存仅发生在 **3,900、7,800、11,700、15,600、19,500**。以同模型 validation AR loss 选择 `best.pt`；`late.pt` 仅在训练完成时指向 step 19,500。论文主比较用 late/final，best 仅作为补充，不能将外部模型 best 与 UniLIP final 称为相同选点规则。
+原 aligned 的完整 5,000 条 validation 和保存仅发生在 **3,900、7,800、11,700、15,600、19,500**；PEFT 当前单独改为 **4,000、8,000、12,000、16,000、19,500**，见第 5.5 节。以同模型 validation AR loss 选择 `best.pt`；`late.pt` 仅在训练完成时指向 step 19,500。论文主比较用 late/final，best 仅作为补充，不能将外部模型 best 与 UniLIP final 称为相同选点规则。
 
 五个 `step_*.pt` 均为完整恢复点，包含模型、optimizer、scheduler、scaler、global optimizer step、RNG、sampler/dataloader 状态和累计边界。best/late 为同文件系统硬链接，不额外复制大 checkpoint；aligned 不创建 last/latest。只能从已有里程碑恢复，不能从任意未保存的日志 step 恢复，也不允许在同一 run 中退回比已有 checkpoint 更早的进度。
 
@@ -308,14 +308,14 @@ CUDA_VISIBLE_DEVICES=0 NPROC_PER_NODE=1 \
   --experiment csgo_seen10_exp32gen_aligned_peft --seed 42 \
   --batch-size 16 --gradient-accumulation-steps 8
 
-# 示例：已有同一 run 的 step_007800.pt 且它是最新里程碑时，原组合恢复。
+# 示例：已有同一 run 的 step_008000.pt 且它是最新里程碑时，原组合恢复。
 CUDA_VISIBLE_DEVICES=0 NPROC_PER_NODE=1 \
   bash scripts/run_csgo_seen10.sh train \
   --experiment csgo_seen10_exp32gen_aligned_peft --seed 42 \
-  --resume /home/jiahao/task/ControlAR/outputs/csgo_seen10_exp32gen_aligned_peft/ControlAR/seed_42/checkpoints/step_007800.pt
+  --resume /home/jiahao/task/ControlAR/outputs/csgo_seen10_exp32gen_aligned_peft/ControlAR/seed_42/checkpoints/step_008000.pt
 ```
 
-上面的两种首次启动组合是互斥示例，不能在同一 run 中切换。恢复必须使用该 run 最新保存的 `step_*.pt`，并保持训练时的 micro/累计、数据、配置、LoRA 代码和完整 optimizer/scheduler/scaler/RNG/sampler 身份一致。五个正式验证保存点仍为 3,900、7,800、11,700、15,600、19,500；step 19,500 的 `late.pt` 是主报告，验证最优的 `best.pt` 是补充报告。
+上面的两种首次启动组合是互斥示例，不能在同一 run 中切换。恢复必须使用该 run 最新保存的 `step_*.pt`，并保持训练时的 micro/累计、数据、配置、LoRA 代码和完整 optimizer/scheduler/scaler/RNG/sampler 身份一致。五个正式验证保存点为 **4,000、8,000、12,000、16,000、19,500**（每 4,000 个 optimizer updates，最后在训练结束补存）；step 19,500 的 `late.pt` 是主报告，验证最优的 `best.pt` 是补充报告。
 
 ```bash
 # 主结果：同一个 PEFT late checkpoint 生成并评测离散、连续两个任务。
@@ -359,7 +359,7 @@ outputs/csgo_seen10_exp32gen_aligned/ControlAR/seed_42/
 └── evaluation/{best,late}/inference_seed_42/{discrete,continuous}/
 ```
 
-PEFT 使用同样的相对结构，但根目录为 `outputs/csgo_seen10_exp32gen_aligned_peft/ControlAR/seed_42/`，checkpoint、预测、评测、日志和审计均与原 aligned 分离。推理还写入各自的 manifest/completion 等记录用于校验；元数据完成标记不能代替实际文件覆盖检查。
+PEFT 使用同样的相对结构，但根目录为 `outputs/csgo_seen10_exp32gen_aligned_peft/ControlAR/seed_42/`，step 文件为 `step_{004000,008000,012000,016000,019500}.pt`；`late.pt` 链接最终 `step_019500.pt`，`best.pt` 链接五次完整 validation loss 最低的 checkpoint。checkpoint、预测、评测、日志和审计均与原 aligned 分离。推理还写入各自的 manifest/completion 等记录用于校验；元数据完成标记不能代替实际文件覆盖检查。
 
 唯一正式指标入口为 `/home/jiahao/task/csgo_benchmark_v2_eval_general/run_eval.py` 和同目录 `benchmark_v2.yaml`。本项目旧 `csgo_benchmark_v2_eval/` 副本保留为历史；runner 不回退到它。读取数据合同的历史依赖不代表使用旧副本计算正式指标。指标实现不复制进模型代码。
 

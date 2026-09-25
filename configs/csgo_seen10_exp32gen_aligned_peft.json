@@ -36,7 +36,7 @@
   "lora_dropout": 0.05,
   "lora_learning_rate": 0.0001,
   "pose_learning_rate": 0.0001,
-  "checkpoint_steps": [3900, 7800, 11700, 15600, 19500],
+  "checkpoint_steps": [4000, 8000, 12000, 16000, 19500],
   "checkpoint_every": 0,
   "validate_every": 0,
   "log_every": 20,

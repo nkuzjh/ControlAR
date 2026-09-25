@@ -249,7 +249,8 @@ def check_source_contract() -> list[str]:
 
 
 def check_checkpoint_contract(
-    run_root: Path, role: str, *, verify_all_sha256: bool = False
+    run_root: Path, role: str, *, verify_all_sha256: bool = False,
+    checkpoint_steps: tuple[int, ...] = CHECKPOINT_STEPS,
 ) -> dict[str, Any]:
     run_root = run_root.expanduser().resolve()
     checkpoint_dir = run_root / "checkpoints"
@@ -260,10 +261,11 @@ def check_checkpoint_contract(
     records = index.get("checkpoints") if isinstance(index, dict) else None
     require(isinstance(records, list), "Checkpoint index has no checkpoints list")
     steps = tuple(sorted(int(record["step"]) for record in records))
-    require(steps == CHECKPOINT_STEPS, f"Checkpoint steps={steps}, expected {CHECKPOINT_STEPS}")
-    require(int(index.get("late_step", -1)) == CHECKPOINT_STEPS[-1], "Checkpoint index late_step is not 19500")
+    require(steps == checkpoint_steps, f"Checkpoint steps={steps}, expected {checkpoint_steps}")
+    require(int(index.get("late_step", -1)) == checkpoint_steps[-1],
+            f"Checkpoint index late_step is not {checkpoint_steps[-1]}")
     best_step = int(index.get("best_step", -1))
-    require(best_step in CHECKPOINT_STEPS, "Checkpoint index best_step is not one of the five milestones")
+    require(best_step in checkpoint_steps, "Checkpoint index best_step is not one of the five milestones")
     for record in records:
         path = checkpoint_dir / str(record.get("path", ""))
         require(path.is_file(), f"Indexed checkpoint is missing: {path}")
@@ -277,7 +279,8 @@ def check_checkpoint_contract(
     require(role_path.is_file(), f"Requested checkpoint role is missing: {role_path}")
     late_path = checkpoint_dir / "late.pt"
     require(late_path.is_file(), "late.pt is missing")
-    require(late_path.samefile(checkpoint_dir / "step_019500.pt"), "late.pt does not reference step_019500.pt")
+    final_path = checkpoint_dir / f"step_{checkpoint_steps[-1]:06d}.pt"
+    require(late_path.samefile(final_path), f"late.pt does not reference {final_path.name}")
     best_record = next(record for record in records if int(record["step"]) == best_step)
     require((checkpoint_dir / "best.pt").samefile(checkpoint_dir / str(best_record["path"])), "best.pt does not reference indexed best checkpoint")
     return {
@@ -286,7 +289,7 @@ def check_checkpoint_contract(
         "role_path": str(role_path),
         "steps": list(steps),
         "best_step": best_step,
-        "late_step": CHECKPOINT_STEPS[-1],
+        "late_step": checkpoint_steps[-1],
         "all_step_sha256_verified": bool(verify_all_sha256),
     }
 

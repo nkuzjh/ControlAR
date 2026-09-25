@@ -18,6 +18,7 @@ from csgo_seen10.artifact_contract import (
 
 EXPERIMENT = "csgo_seen10_exp32gen_aligned_peft"
 FORMAT = f"{EXPERIMENT}_v1"
+PEFT_CHECKPOINT_STEPS = (4_000, 8_000, 12_000, 16_000, 19_500)
 
 
 def validate_peft_checkpoint(
@@ -111,6 +112,8 @@ def validate_peft_checkpoint(
         if smoke else tuple(int(value) for value in training.get("checkpoint_steps", ()))
     )
     formal_steps = tuple(int(value) for value in config["checkpoint_steps"])
+    if not smoke and formal_steps != PEFT_CHECKPOINT_STEPS:
+        raise ValueError("Formal PEFT config milestone schedule mismatch")
     if not saved_steps or len(set(saved_steps)) != len(saved_steps) or tuple(sorted(saved_steps)) != saved_steps:
         raise ValueError("PEFT checkpoint milestone schedule is invalid")
     if not smoke and saved_steps != formal_steps:
@@ -358,7 +361,9 @@ def preflight_evaluation(
         raise ValueError("PEFT evaluation completion audit mismatch")
     index = json.loads((checkpoint.parent / "checkpoint_index.json").read_text(encoding="utf-8"))
     records = index.get("checkpoints", ())
-    if tuple(sorted(int(record.get("step", -1)) for record in records)) != (3900, 7800, 11700, 15600, 19500):
+    if tuple(int(value) for value in config["checkpoint_steps"]) != PEFT_CHECKPOINT_STEPS:
+        raise ValueError("PEFT evaluation config milestones mismatch")
+    if tuple(sorted(int(record.get("step", -1)) for record in records)) != PEFT_CHECKPOINT_STEPS:
         raise ValueError("PEFT evaluation checkpoint index milestones mismatch")
     selected_step = 19500 if expected_role == "late" else int(index.get("best_step", -1))
     if int(index.get("late_step", -1)) != 19500:

@@ -38,7 +38,7 @@
 
 参照 X-VLA aligned-frozen-vl 与 exp32_loc 的关系，比较的是可训练模块的**功能角色**：冻结预训练视觉入口，主要任务 Transformer 使用 LoRA，必要的任务转换模块全量训练。ControlAR 只有一套统一生成 GPT，没有单独的语言 LLM 和 generation DiT，不重复注入两套 LoRA，也不强行建立不存在的模块对应关系。
 
-保持已实现 aligned 的数据、当前样本条件信息、448/448 尺寸、无随机图像增强、AR CE、VQ、有效 batch、总更新数、曝光量、完整验证点、best/late、seed、推理采样和共享评测协议。改变可训练范围及其 LR、weight decay、scheduler；因此与旧 aligned 的比较不是“仅改变 LoRA”单因素消融。
+保持已实现 aligned 的数据、当前样本条件信息、448/448 尺寸、无随机图像增强、AR CE、VQ、有效 batch、总更新数、曝光量、五次完整验证、best/late、seed、推理采样和共享评测协议。改变可训练范围及其 LR、weight decay、scheduler；因此与旧 aligned 的比较不是“仅改变 LoRA”单因素消融。
 
 正式 LoRA 训练 recipe 未找到可直接复用的完整官方配置；官方论文有 LoRA 消融，但不能据此称下面的 rank/LR 是官方推荐或已验证稳定。LoRA 强度参考 exp32_gen，优化保留 ControlAR 已有的 AdamW betas、预训练层 LR/正则经验。小批量 GPU 验收确认两步训练 loss/梯度有限，不据此宣称长期稳定或收敛；未使用测试集调参。
 
@@ -172,7 +172,7 @@ PEFT 不复用原 aligned 的 `_freeze_aligned_inactive_parameters`，以免意�
 
 已完成的小批量训练证据位于 `outputs/csgo_seen10_exp32gen_aligned_peft_smoke/acceptance_20260925_000701`：默认 micro8×累计16 完成 2 updates，模型/optimizer 参数审计和冻结权重逐位核对通过。严格恢复在同一 step 1 checkpoint 分叉、测试专用 deterministic math/SDPA 设置下，step 2 的模型、optimizer、scheduler、scaler、RNG 与 sampler 等状态逐位一致，见 `deterministic_resume_comparison.json`。默认高性能 GPU 后端恢复的下一步 forward loss 完全相同，但 backward 有非确定性；不宣称默认后端逐位恢复。离散 64 张和连续完整 64 帧 clip 的编译推理、448 RGB/样本身份、已有图片跳过不变检查以及共享 evaluator smoke 均通过。连续 smoke 覆盖 TWE/TDE，FID/FVD 按共享 smoke 规则跳过；micro16、多卡和正式全量运行没有执行。完整结果、编译修复边界和证据见 [PEFT 验收报告](outputs/csgo_seen10_exp32gen_aligned_peft_smoke/acceptance_20260925_000701/ACCEPTANCE.md)。
 
-完整训练仍只在 3,900、7,800、11,700、15,600、19,500 验证保存；late/final 是主结果，best 为补充。小批量验收即使通过，也不自动启动正式 19,500-step 训练或 20,000/12,800 全量推理，由用户验收后手动执行。具体命令见 [CSGO_SEEN10.md](CSGO_SEEN10.md)。
+PEFT 完整训练只在 4,000、8,000、12,000、16,000、19,500 验证保存；late/final 是主结果，best 为补充。小批量验收即使通过，也不自动启动正式 19,500-step 训练或 20,000/12,800 全量推理，由用户验收后手动执行。具体命令见 [CSGO_SEEN10.md](CSGO_SEEN10.md)。
 
 ## 8. 跨服务器迁移接入（2026-09-25）
 
@@ -200,3 +200,11 @@ PEFT 不复用原 aligned 的 `_freeze_aligned_inactive_parameters`，以免意�
 评测专用选择逻辑位于 `csgo_seen10/eval_runtime.py`，runner 与只读路径工具统一调用。训练身份所绑定的 `paths.py` 及其他训练源码、配置、兼容 SHA 表不变，避免仅调整评测启动方式就使已有训练 checkpoint 的恢复身份发生变化。`paths.py` 内原有解释器 helper 保留供历史代码使用，当前 runner 不再调用它。
 
 验收：17 项评测解释器与 runner 用例通过，连同原环境/资产脚本用例共 23 项通过；覆盖 CLI、共享环境、显式变量、默认 UniLIP、缺失/不可执行/断链、空格路径及训练不依赖评测环境。只读 `eval --print-paths` 已确认当前默认选择 `/home/jiahao/task/csgo_benchmark_v2_eval_general/.venv/bin/python`。训练源码 SHA、Shell/Python 语法和 diff 检查通过；未安装环境、未启动训练或评测。
+
+## 10. PEFT checkpoint 周期调整
+
+按用户要求，`csgo_seen10_exp32gen_aligned_peft` 的完整验证与常规保存改为 optimizer step **4000、8000、12000、16000、19500**，总训练仍为 19500 updates。训练结束保留五个 `step_*.pt`，`late.pt` 链接 step19500，`best.pt` 链接这五次完整 validation loss 最低的 checkpoint；相同 loss 时保留较早的最佳点。原 aligned 的 3900 周期及 legacy 保存方式不变，PEFT smoke 的缩小步数规则不变。
+
+配置、训练终止检查、checkpoint index 校验及推理/评测前检查使用同一组新里程碑。本次改变了 PEFT 配置身份，旧 3900 周期 checkpoint 不能通过源码兼容开关混入新配置；已有历史产物不改写。
+
+验收：PEFT 与原 aligned 静态配置/数据/权重检查通过；`scripts/test_csgo_seen10_peft_milestones.py` 的 CPU 临时 checkpoint 测试通过，覆盖五个新里程碑、最佳点在最终步之前/最终步、best/late 同文件链接、SHA 校验和旧周期拒绝。未启动训练、推理或评测。

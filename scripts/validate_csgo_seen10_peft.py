@@ -11,10 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from scripts.validate_csgo_seen10_aligned import (
     ContractError, DEFAULT_DATA_ROOT, DEFAULT_EVAL_CONFIG, OFFICIAL_GPT_SHA256,
-    VQ_SHA256, CHECKPOINT_STEPS, check_data_contract, check_checkpoint_contract,
+    VQ_SHA256, check_data_contract, check_checkpoint_contract,
     read_json, require, sha256_file,
 )
 from csgo_seen10.paths import data_root as resolve_data_root, evaluator_root, project_path
+from csgo_seen10.peft_artifact_contract import PEFT_CHECKPOINT_STEPS
 
 EXPERIMENT = "csgo_seen10_exp32gen_aligned_peft"
 DEFAULT_CONFIG = ROOT / "configs" / f"{EXPERIMENT}.json"
@@ -40,7 +41,7 @@ def load_config(path: Path, *, verify_weights: bool = True) -> dict:
     # allowing the PEFT batch factorization and declared optimizer differences.
     baseline = read_json(ROOT / "configs/csgo_seen10_exp32gen_aligned.json")
     mutable = {"experiment", "output_base", "world_size", "batch_size",
-               "gradient_accumulation_steps", "scheduler_type"}
+               "gradient_accumulation_steps", "scheduler_type", "checkpoint_steps"}
     for key, value in baseline.items():
         if key not in mutable:
             require(config.get(key) == value, f"PEFT {key} must retain aligned value {value!r}")
@@ -54,7 +55,7 @@ def load_config(path: Path, *, verify_weights: bool = True) -> dict:
     for key, value in expected.items():
         require(config.get(key) == value, f"PEFT {key}={config.get(key)!r}, expected {value!r}")
     check_batch(config.get("world_size"), config.get("batch_size"), config.get("gradient_accumulation_steps"))
-    require(tuple(config.get("checkpoint_steps", ())) == CHECKPOINT_STEPS, "PEFT checkpoint milestones changed")
+    require(tuple(config.get("checkpoint_steps", ())) == PEFT_CHECKPOINT_STEPS, "PEFT checkpoint milestones changed")
     if verify_weights:
         for key, expected_sha in (("official_gpt_checkpoint", OFFICIAL_GPT_SHA256), ("vq_checkpoint", VQ_SHA256)):
             weight = ROOT / config[key]
@@ -113,7 +114,8 @@ def main() -> None:
         result["parameter_audit"] = check_audit(run_root)
         if not args.smoke:
             result["checkpoint"] = check_checkpoint_contract(
-                run_root, args.checkpoint_role, verify_all_sha256=args.verify_all_checkpoint_sha256)
+                run_root, args.checkpoint_role, verify_all_sha256=args.verify_all_checkpoint_sha256,
+                checkpoint_steps=PEFT_CHECKPOINT_STEPS)
         if args.check_artifacts:
             from csgo_seen10.peft_artifact_contract import preflight_peft_inference
             pred_root = run_root / "predictions" / args.checkpoint_role / f"inference_seed_{args.inference_seed}"
