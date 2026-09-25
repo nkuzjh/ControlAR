@@ -29,6 +29,8 @@ from csgo_seen10.model import (
     load_official_gpt_weights,
 )
 from tokenizer.tokenizer_image.vq_model import VQ_models
+from csgo_seen10.paths import data_root as resolve_data_root, project_path
+from csgo_seen10.source_compat import check_resume_identity
 
 
 ROOT = Path(__file__).resolve().parent
@@ -105,10 +107,11 @@ def parse_args() -> argparse.Namespace:
     ):
         key = name.replace("-", "_")
         default = config.get(key)
-        if name in ("seed", "max_steps", "max_train_samples", "max_val_samples", "resume", "run_dir"):
+        if name in ("seed", "max_steps", "max_train_samples", "max_val_samples", "resume", "run_dir", "data-root"):
             default = None
         parser.add_argument(f"--{name}", dest=key, type=arg_type, default=default)
     parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--allow-legacy-source-resume", action="store_true")
     return parser.parse_args()
 
 
@@ -372,6 +375,8 @@ def _aligned_identity(
         "csgo_seen10/data.py": ROOT / "csgo_seen10" / "data.py",
         "csgo_seen10/model.py": ROOT / "csgo_seen10" / "model.py",
         "csgo_seen10/artifact_contract.py": ROOT / "csgo_seen10" / "artifact_contract.py",
+        "csgo_seen10/paths.py": ROOT / "csgo_seen10" / "paths.py",
+        "csgo_seen10/source_compat.py": ROOT / "csgo_seen10" / "source_compat.py",
         "autoregressive/models/gpt_t2i.py": ROOT / "autoregressive" / "models" / "gpt_t2i.py",
         "autoregressive/train/train_c2i.py": ROOT / "autoregressive" / "train" / "train_c2i.py",
     }
@@ -633,15 +638,14 @@ def main_aligned(args: argparse.Namespace, config: dict[str, Any], config_path: 
         if formal_checkpoint_steps != ALIGNED_CHECKPOINT_STEPS:
             raise ValueError(f"Aligned checkpoint schedule must be {ALIGNED_CHECKPOINT_STEPS}")
 
-    args.data_root = Path(args.data_root).expanduser().resolve()
-    args.official_gpt_checkpoint = Path(args.official_gpt_checkpoint).expanduser().resolve()
-    args.vq_checkpoint = Path(args.vq_checkpoint).expanduser().resolve()
+    args.data_root = resolve_data_root(config, args.data_root, root=ROOT).resolve()
+    args.official_gpt_checkpoint = project_path(args.official_gpt_checkpoint, ROOT).resolve()
+    args.vq_checkpoint = project_path(args.vq_checkpoint, ROOT).resolve()
     if args.run_dir is None:
         args.run_dir = default_run_dir(args.output_base, args.seed, smoke)
     run_dir = Path(args.run_dir).expanduser().resolve()
     checkpoint_dir = run_dir / "checkpoints"
     if not smoke:
-        expected_data_root = Path(config["data_root"]).expanduser().resolve()
         expected_output_base = Path(config["output_base"]).expanduser()
         if not expected_output_base.is_absolute():
             expected_output_base = ROOT / expected_output_base
@@ -689,8 +693,6 @@ def main_aligned(args: argparse.Namespace, config: dict[str, Any], config_path: 
         ]
         if mismatches:
             raise ValueError("Aligned formal configuration was overridden: " + "; ".join(mismatches))
-        if args.data_root != expected_data_root:
-            raise ValueError(f"Aligned data_root must be {expected_data_root}, got {args.data_root}")
         if run_dir != expected_run_dir:
             raise ValueError(f"Aligned run directory must be {expected_run_dir}, got {run_dir}")
         if args.official_gpt_checkpoint != expected_gpt or args.vq_checkpoint != expected_vq:
@@ -821,10 +823,16 @@ def main_aligned(args: argparse.Namespace, config: dict[str, Any], config_path: 
         raise ValueError("Official ControlAR checkpoint SHA256 does not match the aligned config")
     if identity["files"]["vq"] != expected_vq_sha256:
         raise ValueError("VQ checkpoint SHA256 does not match the aligned config")
-    if resume_checkpoint is not None and resume_checkpoint["identity"] != identity:
-        raise ValueError("Aligned resume identity mismatch: data/config/base weights do not match")
+    source_transition = None
+    if resume_checkpoint is not None:
+        source_transition = check_resume_identity(
+            resume_checkpoint["identity"], identity, profile="aligned",
+            allow_legacy=args.allow_legacy_source_resume,
+        )
     if rank == 0:
         _atomic_json_save(identity, run_dir / "audits" / "identity.json")
+        if source_transition is not None:
+            _atomic_json_save(source_transition, run_dir / "audits" / "legacy_source_resume.json")
 
     train_data = Seen10GenerationDataset(train_rows, image_size=args.image_size, include_target=True)
     val_data = Seen10GenerationDataset(val_rows, image_size=args.image_size, include_target=True)
@@ -1242,6 +1250,8 @@ def main() -> None:
     config_path = Path(args.config).resolve()
     config = json.loads(config_path.read_text(encoding="utf-8"))
     for key, value in config.items():
+        if key == "data_root":
+            continue  # Keep CLI unset so the runtime resolver can inspect environment overrides.
         if not hasattr(args, key) or getattr(args, key) is None:
             setattr(args, key, value)
     if getattr(args, "experiment", None) not in (None, ALIGNED_EXPERIMENT):
@@ -1260,9 +1270,9 @@ def main() -> None:
         args.checkpoint_every = 1
         args.validate_every = 1
 
-    args.data_root = Path(args.data_root).expanduser().resolve()
-    args.official_gpt_checkpoint = Path(args.official_gpt_checkpoint).expanduser().resolve()
-    args.vq_checkpoint = Path(args.vq_checkpoint).expanduser().resolve()
+    args.data_root = resolve_data_root(config, args.data_root, root=ROOT).resolve()
+    args.official_gpt_checkpoint = project_path(args.official_gpt_checkpoint, ROOT).resolve()
+    args.vq_checkpoint = project_path(args.vq_checkpoint, ROOT).resolve()
     if args.run_dir is None:
         args.run_dir = default_run_dir(args.output_base, args.seed, args.smoke)
     run_dir = Path(args.run_dir).expanduser().resolve()

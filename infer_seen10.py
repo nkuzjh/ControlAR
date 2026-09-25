@@ -25,6 +25,7 @@ from csgo_seen10.artifact_contract import (
 )
 from csgo_seen10.data import Seen10GenerationDataset, read_benchmark_rows
 from csgo_seen10.model import Seen10GenerationModel, build_gpt, load_checkpoint
+from csgo_seen10.paths import data_root as resolve_data_root, project_path
 from tokenizer.tokenizer_image.vq_model import VQ_models
 
 
@@ -96,7 +97,7 @@ def parse_args() -> argparse.Namespace:
         default = config.get(key, 1 if key == "batch_size" else None)
         if key == "batch_size" and config.get("experiment") in (ALIGNED_EXPERIMENT, PEFT_EXPERIMENT):
             default = config.get("inference_batch_size", default)
-        if key in ("output_root", "checkpoint", "seed", "max_samples"):
+        if key in ("output_root", "checkpoint", "seed", "max_samples", "data_root"):
             default = None
         parser.add_argument(f"--{name}", dest=key, type=arg_type, default=default)
     parser.add_argument(
@@ -676,6 +677,8 @@ def main() -> None:
     config_inference_engine = config.get("inference_engine")
     config_inference_batch = config.get("inference_batch_size", config.get("batch_size"))
     for key, value in config.items():
+        if key == "data_root":
+            continue  # Keep CLI unset so the runtime resolver can inspect environment overrides.
         if not hasattr(args, key) or getattr(args, key) is None:
             setattr(args, key, value)
     if args.inference_engine is None:
@@ -802,10 +805,9 @@ def main() -> None:
     elif args.max_samples is not None:
         raise ValueError("Partial inference is only allowed with --smoke; formal inference must cover the full split")
 
-    args.data_root = Path(args.data_root).expanduser().resolve()
-    args.vq_checkpoint = Path(args.vq_checkpoint).expanduser().resolve()
+    args.data_root = resolve_data_root(config, args.data_root, root=ROOT).resolve()
+    args.vq_checkpoint = project_path(args.vq_checkpoint, ROOT).resolve()
     if aligned:
-        expected_data_root = Path(config["data_root"]).expanduser().resolve()
         expected_vq = Path(config["vq_checkpoint"]).expanduser()
         if not expected_vq.is_absolute():
             expected_vq = ROOT / expected_vq
@@ -818,10 +820,6 @@ def main() -> None:
         if not actual_output_base.is_absolute():
             actual_output_base = ROOT / actual_output_base
         actual_output_base = actual_output_base.resolve()
-        if args.data_root != expected_data_root:
-            raise ValueError(
-                f"Aligned inference data_root must be {expected_data_root}, got {args.data_root}"
-            )
         if args.vq_checkpoint != expected_vq:
             raise ValueError(
                 f"Aligned inference VQ checkpoint must be {expected_vq}, got {args.vq_checkpoint}"

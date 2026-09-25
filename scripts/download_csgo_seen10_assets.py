@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import os
 import shutil
@@ -10,9 +11,6 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-
-import requests
-
 
 ROOT = Path(__file__).resolve().parents[1]
 CHUNK_BYTES = 32 * 1024 * 1024
@@ -55,19 +53,14 @@ DINO_SMALL_FILES = {
     "preprocessor_config.json": "ff5b47c2edcd1d3556d63c01a65d93b58b9efce1",
 }
 
-URLS = {
-    (asset["repo"], asset["filename"]): (
-        f"https://huggingface.co/{asset['repo']}/resolve/"
-        f"{asset['revision']}/{asset['filename']}?download=true"
-    )
-    for asset in ASSETS
-}
 LOCAL = threading.local()
 PROGRESS_LOCK = threading.Lock()
 PROGRESS = {"done": 0, "downloaded": 0, "next_percent": 20}
 
 
-def get_session() -> requests.Session:
+def get_session():
+    import requests
+
     session = getattr(LOCAL, "session", None)
     if session is None:
         session = requests.Session()
@@ -89,7 +82,44 @@ def git_blob_id(data: bytes) -> str:
 
 
 def asset_url(asset: dict) -> str:
-    return URLS[(asset["repo"], asset["filename"])]
+    endpoint = os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
+    return f"{endpoint}/{asset['repo']}/resolve/{asset['revision']}/{asset['filename']}?download=true"
+
+
+def check_assets() -> bool:
+    """Read and hash only final files; never import network libraries or mutate disk."""
+    valid = True
+    for asset in ASSETS:
+        target = asset["target"]
+        if not target.is_file():
+            print(f"MISSING {target}")
+            valid = False
+            continue
+        size = target.stat().st_size
+        if size != asset["size"]:
+            print(f"SIZE MISMATCH {target}: {size:,}, expected {asset['size']:,}")
+            valid = False
+            continue
+        actual = sha256_file(target)
+        if actual != asset["sha256"]:
+            print(f"SHA256 MISMATCH {target}: {actual}, expected {asset['sha256']}")
+            valid = False
+        else:
+            print(f"OK {target}: sha256={actual}")
+    metadata_dir = ROOT / "autoregressive/models/dinov2-small"
+    for filename, expected_blob in DINO_SMALL_FILES.items():
+        target = metadata_dir / filename
+        if not target.is_file():
+            print(f"MISSING {target}")
+            valid = False
+            continue
+        actual = git_blob_id(target.read_bytes())
+        if actual != expected_blob:
+            print(f"GIT BLOB MISMATCH {target}: {actual}, expected {expected_blob}")
+            valid = False
+        else:
+            print(f"OK {target}: git_blob={actual}")
+    return valid
 
 
 def expected_part_size(asset: dict, index: int) -> int:
@@ -339,7 +369,8 @@ def fetch_dino_metadata() -> None:
         if target.exists():
             data = target.read_bytes()
         else:
-            url = f"https://huggingface.co/{repo}/resolve/{revision}/{filename}?download=true"
+            endpoint = os.environ.get("HF_ENDPOINT", "https://huggingface.co").rstrip("/")
+            url = f"{endpoint}/{repo}/resolve/{revision}/{filename}?download=true"
             with get_session().get(url, timeout=(30, 120)) as response:
                 response.raise_for_status()
                 data = response.content
@@ -438,4 +469,14 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Download pinned official ControlAR assets or verify local files."
+    )
+    parser.add_argument(
+        "--check", action="store_true",
+        help="Hash every final local file without writes or network access; fail if missing or mismatched.",
+    )
+    args = parser.parse_args()
+    if args.check:
+        raise SystemExit(0 if check_assets() else 1)
     main()

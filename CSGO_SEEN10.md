@@ -112,18 +112,30 @@ legacy 默认单卡 micro=1、无累计，6 epochs = 300,000 updates；每 60,00
 
 ## 4. 环境和官方权重
 
-统一准备入口（按需手动执行；包含依赖安装和权重下载）：
+### 4.1 新服务器环境准备
+
+从新服务器的 ControlAR checkout 根目录执行；不要求用户名、安装目录或 Conda 环境名称相同。Git 不包含 `.venv`、`.venv-eval`、模型权重、数据、共享 evaluator 或历史输出，这些内容须分别准备。不要复制旧服务器的 Python 环境目录。
 
 ```bash
-cd /home/jiahao/task/ControlAR
-bash scripts/setup_csgo_seen10.sh
+# 环境与权重可以分开准备；下列命令由用户手动执行。
+bash scripts/setup_csgo_seen10.sh --env-only
+./.venv/bin/python scripts/download_csgo_seen10_assets.py
+
+# 生成评测需要额外依赖，放入独立 .venv-eval，避免改变训练依赖。
+bash scripts/setup_csgo_seen10.sh --eval-only
+
+# 只读检查，不安装、不下载，也不初始化 CUDA。
+bash scripts/setup_csgo_seen10.sh --check
+bash scripts/setup_csgo_seen10.sh --eval-only --check
+./.venv/bin/python scripts/download_csgo_seen10_assets.py --check
+
+# 在目标计算节点另行验证 CUDA/实际 GPU；会执行小矩阵检查。
+bash scripts/setup_csgo_seen10.sh --check-cuda
 ```
 
-脚本优先复用项目 `.venv`；缺失时优先独立复制本机 UniLIP Conda 环境，否则使用 `CONTROLAR_BOOTSTRAP_PYTHON` 指定的 Python 3.10–3.12 建立隔离 venv。只移除项目副本中的 UniLIP editable `.pth`，不修改来源环境。缺少兼容 CUDA runtime 时安装 PyTorch 2.7.1 / torchvision 0.22.1 cu128，再安装 `requirements-csgo-seen10.txt`。新服务器不要直接复制旧 `.venv`。
+不加参数的 `setup_csgo_seen10.sh` 仍为训练环境与模型资产的一键准备。已有兼容环境优先保留，不自动替换已安装的 nightly PyTorch；新环境从 PATH 选择兼容 Python，必要时用 Conda 创建项目内解释器。可用 `CONTROLAR_BOOTSTRAP_PYTHON=/path/to/python3.11` 显式指定，不再默认克隆另一项目环境。显式 `CONTROLAR_CLONE_FROM` 仍用于确实需要复制某个已有 Conda 环境的情况。
 
-```bash
-CONTROLAR_BOOTSTRAP_PYTHON=/path/to/python3.11 bash scripts/setup_csgo_seen10.sh
-```
+新环境默认采用稳定 cu128 PyTorch/torchvision 配对。后端选项见 `bash scripts/setup_csgo_seen10.sh --help`；CPU 后端只适合配置检查，正式 ControlAR BF16 训练/推理仍需支持的 NVIDIA GPU 与驱动。环境选择不改变实验 batch、学习率或模型配置，也不承诺跨 GPU/库版本逐位一致。`--check` 执行关键包 CPU 导入及本地资产哈希检查（`--env-only` / `--eval-only` 时不检查模型资产），确认 CUDA 未初始化；它不能替代新服务器的 `--check-cuda` 和独立 smoke。评测环境选择 Python 3.11–3.12，以兼容共享 evaluator 固定的 [SciPy 1.17.0](https://pypi.org/project/scipy/1.17.0/)；训练环境支持 3.10–3.12。新环境的 PyTorch 2.7.1 / torchvision 0.22.1 配对依据 [PyTorch 官方版本表](https://pytorch.org/get-started/previous-versions/)。
 
 首次接入的已验证环境记录：Python 3.11.14、Torch `2.11.0.dev20260124+cu128`、torchvision `0.25.0.dev20260124+cu128`、CUDA runtime 12.8、包含 `sm_120`；RTX PRO 6000 Blackwell，彼时驱动 580.173.02 / 系统 CUDA 13.0。依赖 import、CUDA 可用性和 4×4 矩阵计算曾通过。这是历史验收记录，不代表新服务器或未来环境自动具有相同版本。
 
@@ -137,15 +149,56 @@ CONTROLAR_BOOTSTRAP_PYTHON=/path/to/python3.11 bash scripts/setup_csgo_seen10.sh
 
 DINO 同 revision 的 `config.json`、`preprocessor_config.json` Git blob ID 分别为 `5664b325e6258d3960fad8c4c1cff958f3cc2272`、`ff5b47c2edcd1d3556d63c01a65d93b58b9efce1`。首次准备时三个权重及两个 JSON 均通过校验。新 PEFT 若冻结视觉 encoder，应冻结 Canny-MR 加载后的视觉权重，不能另换成原始 DINO 权重。
 
-runner 支持以下环境变量；默认路径适用于本机，迁移时显式设置：
+### 4.2 数据、共享评测器与路径覆盖
 
-| 变量 | 默认/用途 |
-| --- | --- |
-| `CONTROLAR_PYTHON` | 项目 `.venv/bin/python`，训练和推理 |
-| `CSGO_BENCHMARK_V2_DATA` | `/home/jiahao/task/UniLIP/data/csgo_benchmark_v2` |
-| `SHARED_EVAL_DIR` | 相邻 `../csgo_benchmark_v2_eval_general` |
-| `UNILIP_PYTHON` | `/home/jiahao/miniconda3/envs/UniLIP/bin/python`，评测依赖环境 |
-| `NPROC_PER_NODE` | 默认 1；已实现正式 aligned 固定单卡 |
+建议保持同级布局；只需完整 Benchmark v2 数据 bundle，不要求安装 UniLIP 模型代码：
+
+```text
+workspace/
+  ControlAR/
+  UniLIP/data/csgo_benchmark_v2/
+  csgo_benchmark_v2_eval_general/
+```
+
+路径优先级是 **CLI → 环境变量 → 配置中的可用旧默认路径 → checkout 相对默认值**。自定义或显式给出的错误路径不会被自动替换。相对路径都以 ControlAR 根目录为基准，与调用 shell 的当前目录无关。三个 canonical JSON 保持原字节，机器路径在运行时解析，不修改实验含义。
+
+| 用途 | 默认 | 环境变量 | runner CLI |
+| --- | --- | --- | --- |
+| 数据 | 原配置旧路径存在时保留；否则 `../UniLIP/data/csgo_benchmark_v2` | `CSGO_DATA_ROOT`，兼容 `CSGO_BENCHMARK_V2_DATA`、`DATA_ROOT` | `--data-root` |
+| 共享评测器 | `../csgo_benchmark_v2_eval_general` | `SHARED_EVAL_DIR`，兼容 `CSGO_EVAL_ROOT` | `--eval-root` |
+| 评测 Python | `.venv-eval/bin/python`；旧 UniLIP Python 存在时保留为后备；否则 `.venv/bin/python` | `EVAL_PYTHON`，兼容 `UNILIP_PYTHON` | `--eval-python`，兼容 `--unilip-python` |
+| 训练/推理 Python | `.venv/bin/python` | `CONTROLAR_PYTHON` | — |
+| 标准库路径检查 Python | PATH 中的 python3/python | `CONTROLAR_PATHS_PYTHON` | — |
+| GPU 进程数 | 1；原 aligned 固定单卡，PEFT 保持有效 batch128 | `NPROC_PER_NODE` | — |
+
+多个别名同时设置时按表内从左到右优先；清理不再使用的环境变量。官方 GPT/VQ/DINO 仍放在项目内的固定相对位置；整个 checkout 可换位置，单独数据目录则用显式覆盖。新服务器本地生成的模型和结果沿用相同训练、推理、评测命令。
+
+```bash
+# 非默认布局时，只需设置本机路径。变量应同时用于训练、推理和评测。
+export CSGO_DATA_ROOT=/actual/path/to/csgo_benchmark_v2
+export SHARED_EVAL_DIR=/actual/path/to/csgo_benchmark_v2_eval_general
+# 可选：使用已准备好的专门评测解释器。
+# export EVAL_PYTHON=/actual/path/to/eval-env/bin/python
+
+# 无需模型环境或 GPU，只打印解析结果，不创建 run、不加载 checkpoint。
+bash scripts/run_csgo_seen10.sh train \
+  --experiment csgo_seen10_exp32gen_aligned_peft --print-paths
+bash scripts/run_csgo_seen10.sh eval \
+  --experiment csgo_seen10_exp32gen_aligned_peft --print-paths
+
+# metadata、split/calibration、官方权重哈希与实验配置检查；不启动训练。
+./.venv/bin/python scripts/validate_csgo_seen10_peft.py
+```
+
+共享 evaluator 必须另行同步完整目录及 `benchmark_v2.yaml`；没有回退到项目内旧指标实现。评测预训练资产与 ControlAR 模型权重是两组资产：FID/LPIPS/VGG 使用 Torch Hub 缓存（`TORCH_HOME` 或默认 `~/.cache/torch`），FVD 的 I3D 使用 `UNILIP_FVD_CACHE_DIR`（未设置时 evaluator 相对工作目录下 `loaded_models`）。离线服务器还需提前准备这些 metric 权重；有网络时首次完整评测可能下载。模型下载脚本支持 `HF_ENDPOINT`，始终保留官方固定 revision/SHA 校验。
+
+### 4.3 恢复边界
+
+本次迁移支持在另一服务器从官方 base **重新开始同配方实验**，随后在那台服务器训练、推理和评测。旧 checkpoint/预测 manifest 中的绝对数据路径及完整身份校验没有放宽；直接复制旧 run 到另一数据路径不等于支持精确续训或续写，默认会拒绝身份不匹配。不要手工改旧 checkpoint 或 manifest。
+
+本次路径接入修改了训练入口源码，因此历史同路径 checkpoint 的源码 SHA 与当前版本不同。默认恢复仍严格拒绝；仅对本次明确登记的旧版本，可在原数据路径、配置、权重等全部一致时，在原 `train ... --resume <checkpoint>` 命令末尾追加 `--allow-legacy-source-resume`。该选项检查已登记的旧/新源码完整 SHA 集合并写入兼容审计，新 checkpoint 保存当前真实源码身份；它不能跨路径迁移，也不能跳过任意代码变化。无需该选项的新版本同路径恢复沿用第 5 节命令。原运行中的训练进程不会被停止或重启。
+
+本轮迁移实现与只读验收记录见 [迁移验收报告](outputs/csgo_seen10_portability_checks/20260925_005013/ACCEPTANCE.md)。本机已通过 CPU 导入与资产检查，独立 `.venv-eval` 和新服务器环境尚未实际安装；完整硬件与 GPU smoke 仍由目标服务器执行。
 
 ## 5. 直接执行命令
 
@@ -230,7 +283,7 @@ aligned 使用 `inference_seed + sample_id + token index` 派生的随机流；�
 
 ### 5.5 aligned PEFT：手动训练、恢复、推理和评测
 
-以下正式命令供小批量验收通过后的**用户手动执行**；当前没有启动 PEFT 正式训练。训练从官方 Canny-MR 初始化，不读取原 aligned 的 checkpoint。默认单卡 micro8×累计16；可覆盖分解方式，但 `world_size × micro_batch × accumulation` 必须等于 128。`train_seen10_peft.py`、`csgo_seen10/peft.py`、`csgo_seen10/peft_artifact_contract.py`、`csgo_seen10/peft_compiled_inference.py` 和 `scripts/validate_csgo_seen10_peft.py` 负责独立 PEFT 行为。`csgo_seen10/compiled_inference.py` 增加 PEFT 专用 opt-in 分支，legacy 和原 aligned 的默认分支未变。现有 aligned 恢复所绑定的八个旧文件（`train_seen10.py`、`csgo_seen10/model.py`、`csgo_seen10/data.py`、`csgo_seen10/artifact_contract.py`、`autoregressive/models/gpt_t2i.py`、`autoregressive/train/train_c2i.py`、`configs/csgo_seen10.json`、`configs/csgo_seen10_exp32gen_aligned.json`）的 SHA 均保持不变，证据见第 8 节。
+以下正式命令供小批量验收通过后的**用户手动执行**；当前没有启动 PEFT 正式训练。训练从官方 Canny-MR 初始化，不读取原 aligned 的 checkpoint。默认单卡 micro8×累计16；可覆盖分解方式，但 `world_size × micro_batch × accumulation` 必须等于 128。`train_seen10_peft.py`、`csgo_seen10/peft.py`、`csgo_seen10/peft_artifact_contract.py`、`csgo_seen10/peft_compiled_inference.py` 和 `scripts/validate_csgo_seen10_peft.py` 负责独立 PEFT 行为。`csgo_seen10/compiled_inference.py` 增加 PEFT 专用 opt-in 分支，legacy 和原 aligned 的默认分支未变。此前 PEFT 验收时，现有 aligned 恢复所绑定的八个旧文件（`train_seen10.py`、`csgo_seen10/model.py`、`csgo_seen10/data.py`、`csgo_seen10/artifact_contract.py`、`autoregressive/models/gpt_t2i.py`、`autoregressive/train/train_c2i.py`、`configs/csgo_seen10.json`、`configs/csgo_seen10_exp32gen_aligned.json`）的 SHA 均保持不变，证据见第 8 节；之后本轮路径迁移的源码兼容边界见第 4.3 节。
 
 ```bash
 # 默认：单卡 micro 8 × 累计 16 = 有效 batch 128。

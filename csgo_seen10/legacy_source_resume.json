@@ -1,0 +1,50 @@
+{
+  "profiles": {
+    "aligned": {
+      "source": {
+        "autoregressive/models/gpt_t2i.py": "23b05a02584564b7b54bdae177a873433274403a4c0c67606f4c3fd512cd0083",
+        "autoregressive/train/train_c2i.py": "8cf2fd6bf94ff96ab9e92f272327d2e70ce3a003a96c6aa8630eaf33dd114ea5",
+        "csgo_seen10/artifact_contract.py": "3203085dc1036bdef1427b45df178d206e81f3a780982212d044cc2017fd07ee",
+        "csgo_seen10/data.py": "99f64a3bd520e9918ba8c001cdd75364783dcebe3c8f9a440b1e5206023c3218",
+        "csgo_seen10/model.py": "347f741d87a7e5e0fc343d3138d61f6b9e28ba80728d4cc24a0c9947894ad27e",
+        "train_seen10.py": "feb890f18ace98922659d06983d80c72bc20fa75c8b4086b17f4651cd3ef8d1d"
+      },
+      "target": {
+        "autoregressive/models/gpt_t2i.py": "23b05a02584564b7b54bdae177a873433274403a4c0c67606f4c3fd512cd0083",
+        "autoregressive/train/train_c2i.py": "8cf2fd6bf94ff96ab9e92f272327d2e70ce3a003a96c6aa8630eaf33dd114ea5",
+        "csgo_seen10/artifact_contract.py": "3203085dc1036bdef1427b45df178d206e81f3a780982212d044cc2017fd07ee",
+        "csgo_seen10/data.py": "99f64a3bd520e9918ba8c001cdd75364783dcebe3c8f9a440b1e5206023c3218",
+        "csgo_seen10/model.py": "347f741d87a7e5e0fc343d3138d61f6b9e28ba80728d4cc24a0c9947894ad27e",
+        "csgo_seen10/paths.py": "b425603269abface7743edd1ac99fbe9ed34af486cfc493e598fbe4befe0709c",
+        "csgo_seen10/source_compat.py": "24e8d047f2783b9868a62cf2ca360930811f73e2c907681247f7512dbcbf813f",
+        "train_seen10.py": "f16360b8e10cc816c15be6795e918550d4228b2e6aee056a7f2788549a8adc0f"
+      }
+    },
+    "peft": {
+      "source": {
+        "autoregressive/models/gpt_t2i.py": "23b05a02584564b7b54bdae177a873433274403a4c0c67606f4c3fd512cd0083",
+        "autoregressive/train/train_c2i.py": "8cf2fd6bf94ff96ab9e92f272327d2e70ce3a003a96c6aa8630eaf33dd114ea5",
+        "csgo_seen10/artifact_contract.py": "3203085dc1036bdef1427b45df178d206e81f3a780982212d044cc2017fd07ee",
+        "csgo_seen10/data.py": "99f64a3bd520e9918ba8c001cdd75364783dcebe3c8f9a440b1e5206023c3218",
+        "csgo_seen10/model.py": "347f741d87a7e5e0fc343d3138d61f6b9e28ba80728d4cc24a0c9947894ad27e",
+        "csgo_seen10/peft.py": "1f3e1fb0f082af14b85200bcbdb29450800603728db3915acbf3782116cb5ca1",
+        "train_seen10.py": "feb890f18ace98922659d06983d80c72bc20fa75c8b4086b17f4651cd3ef8d1d",
+        "train_seen10_peft.py": "b1ca1dc57fa6a9bbf18ef01a1f0fdd0b549243588a1cd062daf60d094550b3ef"
+      },
+      "target": {
+        "autoregressive/models/gpt_t2i.py": "23b05a02584564b7b54bdae177a873433274403a4c0c67606f4c3fd512cd0083",
+        "autoregressive/train/train_c2i.py": "8cf2fd6bf94ff96ab9e92f272327d2e70ce3a003a96c6aa8630eaf33dd114ea5",
+        "csgo_seen10/artifact_contract.py": "3203085dc1036bdef1427b45df178d206e81f3a780982212d044cc2017fd07ee",
+        "csgo_seen10/data.py": "99f64a3bd520e9918ba8c001cdd75364783dcebe3c8f9a440b1e5206023c3218",
+        "csgo_seen10/model.py": "347f741d87a7e5e0fc343d3138d61f6b9e28ba80728d4cc24a0c9947894ad27e",
+        "csgo_seen10/paths.py": "b425603269abface7743edd1ac99fbe9ed34af486cfc493e598fbe4befe0709c",
+        "csgo_seen10/peft.py": "1f3e1fb0f082af14b85200bcbdb29450800603728db3915acbf3782116cb5ca1",
+        "csgo_seen10/source_compat.py": "24e8d047f2783b9868a62cf2ca360930811f73e2c907681247f7512dbcbf813f",
+        "train_seen10.py": "f16360b8e10cc816c15be6795e918550d4228b2e6aee056a7f2788549a8adc0f",
+        "train_seen10_peft.py": "123a16065388365a07e22e196f92c8445019fdf579c8a7fbaa6669dff0fe0fa6"
+      }
+    }
+  },
+  "schema_version": 1,
+  "source_commit": "d8fb9dfec5e732a33459fea06969d208310cd9ad"
+}

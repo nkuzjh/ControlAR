@@ -2,12 +2,11 @@
 set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON="${CONTROLAR_PYTHON:-${PROJECT_ROOT}/.venv/bin/python}"
-UNILIP_PYTHON="${UNILIP_PYTHON:-/home/jiahao/miniconda3/envs/UniLIP/bin/python}"
-SHARED_EVAL_DIR="${SHARED_EVAL_DIR:-${PROJECT_ROOT}/../csgo_benchmark_v2_eval_general}"
-EVALUATOR="${SHARED_EVAL_DIR}/run_eval.py"
-EVAL_CONFIG="${SHARED_EVAL_DIR}/benchmark_v2.yaml"
-DATA_ROOT="${CSGO_BENCHMARK_V2_DATA:-/home/jiahao/task/UniLIP/data/csgo_benchmark_v2}"
+# Resolve all host paths after CLI parsing with the stdlib-only resolver.
+DATA_ROOT_OVERRIDE=""
+EVAL_ROOT_OVERRIDE=""
+EVAL_PYTHON_OVERRIDE=""
+PRINT_PATHS=0
 OUTPUT_BASE="${PROJECT_ROOT}/outputs/csgo_benchmark_v2_seen10/ControlAR"
 ALIGNED_EXPERIMENT="csgo_seen10_exp32gen_aligned"
 PEFT_EXPERIMENT="csgo_seen10_exp32gen_aligned_peft"
@@ -17,8 +16,9 @@ TRAIN_ENTRY="train_seen10.py"
 VALIDATOR="scripts/validate_csgo_seen10_aligned.py"
 export PYTHONDONTWRITEBYTECODE=1
 
-if [[ $# -lt 1 ]]; then
-  echo "Usage: $0 {smoke|train|infer|eval} [--experiment csgo_seen10_exp32gen_aligned|csgo_seen10_exp32gen_aligned_peft] [--seed N] [--run-root PATH] [--checkpoint-role late|best] [--inference-seed N] [options...]" >&2
+if [[ $# -lt 1 || "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  echo "Usage: $0 {smoke|train|infer|eval} [--experiment csgo_seen10_exp32gen_aligned|csgo_seen10_exp32gen_aligned_peft] [--seed N] [--run-root PATH] [--checkpoint-role late|best] [--inference-seed N] [--data-root PATH] [--eval-root PATH] [--eval-python PATH] [--print-paths] [options...]" >&2
+  [[ $# -gt 0 ]] && exit 0
   exit 2
 fi
 
@@ -35,6 +35,29 @@ INFERENCE_SEED=""
 FORWARD_ARGS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --print-paths)
+      PRINT_PATHS=1
+      shift
+      ;;
+    --data-root|--eval-root|--eval-python|--unilip-python)
+      [[ $# -ge 2 && -n "$2" ]] || { echo "$1 needs a path" >&2; exit 2; }
+      case "$1" in
+        --data-root) DATA_ROOT_OVERRIDE="$2" ;;
+        --eval-root) EVAL_ROOT_OVERRIDE="$2" ;;
+        *) EVAL_PYTHON_OVERRIDE="$2" ;;
+      esac
+      shift 2
+      ;;
+    --data-root=*|--eval-root=*|--eval-python=*|--unilip-python=*)
+      path_value="${1#*=}"
+      [[ -n "$path_value" ]] || { echo "$1 needs a path" >&2; exit 2; }
+      case "$1" in
+        --data-root=*) DATA_ROOT_OVERRIDE="$path_value" ;;
+        --eval-root=*) EVAL_ROOT_OVERRIDE="$path_value" ;;
+        *) EVAL_PYTHON_OVERRIDE="$path_value" ;;
+      esac
+      shift
+      ;;
     --seed)
       [[ $# -ge 2 ]] || { echo "--seed needs a value" >&2; exit 2; }
       SEED="$2"
@@ -144,6 +167,36 @@ elif [[ -n "$CHECKPOINT_ROLE" || -n "$INFERENCE_SEED" ]]; then
   exit 2
 fi
 
+case "$ACTION" in
+  smoke|train|infer|eval) ;;
+  *) echo "Unknown action: $ACTION (expected smoke, train, infer, or eval)" >&2; exit 2 ;;
+esac
+# The resolver must work before installing torch or a model environment.
+PATHS_PYTHON="${CONTROLAR_PATHS_PYTHON:-}"
+if [[ -z "$PATHS_PYTHON" ]]; then
+  PATHS_PYTHON="$(command -v python3 || command -v python || true)"
+fi
+if [[ -z "$PATHS_PYTHON" ]]; then
+  PATHS_PYTHON="${PROJECT_ROOT}/.venv/bin/python"
+fi
+PATH_ARGS=(--experiment "$EXPERIMENT" --seed "$SEED")
+[[ -z "$DATA_ROOT_OVERRIDE" ]] || PATH_ARGS+=(--data-root "$DATA_ROOT_OVERRIDE")
+[[ -z "$EVAL_ROOT_OVERRIDE" ]] || PATH_ARGS+=(--eval-root "$EVAL_ROOT_OVERRIDE")
+[[ -z "$EVAL_PYTHON_OVERRIDE" ]] || PATH_ARGS+=(--eval-python "$EVAL_PYTHON_OVERRIDE")
+[[ -z "$RUN_ROOT_OVERRIDE" ]] || PATH_ARGS+=(--run-root "$RUN_ROOT_OVERRIDE")
+if [[ "$PRINT_PATHS" == "1" ]]; then
+  exec "$PATHS_PYTHON" "$PROJECT_ROOT/scripts/csgo_runtime_paths.py" "${PATH_ARGS[@]}"
+fi
+PATH_VALUES="$("$PATHS_PYTHON" "$PROJECT_ROOT/scripts/csgo_runtime_paths.py" "${PATH_ARGS[@]}" --lines)"
+mapfile -t RESOLVED_PATHS <<< "$PATH_VALUES"
+PYTHON="${RESOLVED_PATHS[0]}"
+DATA_ROOT="${RESOLVED_PATHS[1]}"
+SHARED_EVAL_DIR="${RESOLVED_PATHS[2]}"
+UNILIP_PYTHON="${RESOLVED_PATHS[3]}"
+RESOLVED_RUN_ROOT="${RESOLVED_PATHS[4]}"
+EVALUATOR="${SHARED_EVAL_DIR}/run_eval.py"
+EVAL_CONFIG="${SHARED_EVAL_DIR}/benchmark_v2.yaml"
+
 check_model_python() {
   if [[ ! -x "$PYTHON" ]]; then
     echo "ControlAR Python environment is missing: $PYTHON" >&2
@@ -163,7 +216,7 @@ check_evaluator() {
     return 1
   fi
   if [[ ! -x "$UNILIP_PYTHON" ]]; then
-    echo "UniLIP evaluator Python is missing: $UNILIP_PYTHON" >&2
+    echo "Evaluator Python is missing: $UNILIP_PYTHON; prepare it with scripts/setup_csgo_seen10.sh --eval-only or set EVAL_PYTHON." >&2
     return 1
   fi
 }
@@ -172,10 +225,7 @@ cd "$PROJECT_ROOT"
 if [[ "$ALIGNED" == "1" ]]; then
   OUTPUT_BASE="$ALIGNED_OUTPUT_BASE"
 fi
-RUN_ROOT="${OUTPUT_BASE}/seed_${SEED}"
-if [[ -n "$RUN_ROOT_OVERRIDE" ]]; then
-  RUN_ROOT="$RUN_ROOT_OVERRIDE"
-fi
+RUN_ROOT="$RESOLVED_RUN_ROOT"
 DEFAULT_RUN_ROOT="${OUTPUT_BASE}/seed_${SEED}"
 if [[ "$ALIGNED" == "1" && "$ACTION" != "smoke" && -n "$RUN_ROOT_OVERRIDE" ]]; then
   if [[ "$(realpath -m "$RUN_ROOT")" != "$(realpath -m "$DEFAULT_RUN_ROOT")" ]]; then

@@ -21,6 +21,8 @@ import train_seen10 as common
 from csgo_seen10.data import Seen10GenerationDataset, read_benchmark_rows
 from csgo_seen10.model import Seen10GenerationModel, build_gpt, load_checkpoint, load_official_gpt_weights
 from csgo_seen10.peft import audit_parameters, build_optimizer, configure_trainable, inject_lora
+from csgo_seen10.paths import data_root as resolve_data_root
+from csgo_seen10.source_compat import check_resume_identity
 
 
 ROOT = Path(__file__).resolve().parent
@@ -51,6 +53,8 @@ def parse_args() -> argparse.Namespace:
     for key in ("data_root", "official_gpt_checkpoint", "vq_checkpoint", "output_base",
                 "gpt_model", "adapter_size", "condition_type", "precision"):
         parser.add_argument("--" + key.replace("_", "-"), default=config[key])
+    parser.set_defaults(data_root=None)
+    parser.add_argument("--allow-legacy-source-resume", action="store_true")
     for key in ("image_size", "downsample_size", "token_count", "caption_dim", "epochs",
                 "batch_size", "gradient_accumulation_steps", "effective_batch_size",
                 "max_optimizer_steps", "num_workers", "seed", "log_every"):
@@ -169,11 +173,9 @@ def train(args: argparse.Namespace) -> None:
     if args.smoke and (args.smoke_steps < 1 or (args.smoke_stop_after_step is not None and
                          not 1 <= args.smoke_stop_after_step <= args.smoke_steps)):
         raise ValueError("Invalid smoke step budget or stop point")
-    args.data_root = Path(args.data_root).expanduser().resolve()
+    args.data_root = resolve_data_root(config, args.data_root, root=ROOT).resolve()
     args.official_gpt_checkpoint = (ROOT / args.official_gpt_checkpoint).resolve()
     args.vq_checkpoint = (ROOT / args.vq_checkpoint).resolve()
-    if formal and args.data_root != Path(config["data_root"]).expanduser().resolve():
-        raise ValueError("Formal PEFT data root differs from canonical benchmark")
     if formal and (args.official_gpt_checkpoint != (ROOT / config["official_gpt_checkpoint"]).resolve() or
                    args.vq_checkpoint != (ROOT / config["vq_checkpoint"]).resolve()):
         raise ValueError("Formal PEFT GPT/VQ paths differ from canonical checkpoints")
@@ -251,10 +253,16 @@ def train(args: argparse.Namespace) -> None:
         raise ValueError("Official GPT SHA256 mismatch")
     if identity["files"]["vq"] != config["vq_sha256"]:
         raise ValueError("VQ SHA256 mismatch")
-    if resume is not None and resume.get("identity") != identity:
-        raise ValueError("PEFT exact resume identity mismatch")
+    source_transition = None
+    if resume is not None:
+        source_transition = check_resume_identity(
+            resume["identity"], identity, profile="peft",
+            allow_legacy=args.allow_legacy_source_resume,
+        )
     if rank == 0:
         common._atomic_json_save(identity, run_dir / "audits" / "identity.json")
+        if source_transition is not None:
+            common._atomic_json_save(source_transition, run_dir / "audits" / "legacy_source_resume.json")
     train_data = Seen10GenerationDataset(train_rows, image_size=args.image_size, include_target=True)
     val_data = Seen10GenerationDataset(val_rows, image_size=args.image_size, include_target=True)
     sampler = DistributedSampler(train_data, num_replicas=world_size, rank=rank,

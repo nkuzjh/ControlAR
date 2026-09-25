@@ -157,7 +157,7 @@ micro16: 3,120 microsteps/epoch ÷  8 = 390 updates/epoch
 
 PEFT 不复用原 aligned 的 `_freeze_aligned_inactive_parameters`，以免意外解冻 LoRA base。训练入口的实际参数审计已确认冻结 vision/projector/VQ/base 没进入 optimizer，指定 trainable 没漏收。
 
-此次实现未修改 X-VLA、UniLIP 或共享 evaluator。现有 aligned 恢复所绑定的八个文件（`train_seen10.py`、`csgo_seen10/model.py`、`csgo_seen10/data.py`、`csgo_seen10/artifact_contract.py`、`autoregressive/models/gpt_t2i.py`、`autoregressive/train/train_c2i.py`、两个旧配置 JSON）的 SHA 均保持不变，见验收根下 `original_source_preservation.json`。`csgo_seen10/compiled_inference.py` 已增加 PEFT opt-in，不能列作保持旧 SHA 的文件。新实验有独立 run、checkpoint、预测、evaluation 和日志目录。
+此前 PEFT 实现未修改 X-VLA、UniLIP 或共享 evaluator。当时 aligned 恢复所绑定的八个文件（`train_seen10.py`、`csgo_seen10/model.py`、`csgo_seen10/data.py`、`csgo_seen10/artifact_contract.py`、`autoregressive/models/gpt_t2i.py`、`autoregressive/train/train_c2i.py`、两个旧配置 JSON）的 SHA 均保持不变，见验收根下 `original_source_preservation.json`。`csgo_seen10/compiled_inference.py` 已增加 PEFT opt-in，不能列作保持旧 SHA 的文件。新实验有独立 run、checkpoint、预测、evaluation 和日志目录。
 
 ## 7. 小批量验收标准与结果
 
@@ -173,3 +173,22 @@ PEFT 不复用原 aligned 的 `_freeze_aligned_inactive_parameters`，以免意�
 已完成的小批量训练证据位于 `outputs/csgo_seen10_exp32gen_aligned_peft_smoke/acceptance_20260925_000701`：默认 micro8×累计16 完成 2 updates，模型/optimizer 参数审计和冻结权重逐位核对通过。严格恢复在同一 step 1 checkpoint 分叉、测试专用 deterministic math/SDPA 设置下，step 2 的模型、optimizer、scheduler、scaler、RNG 与 sampler 等状态逐位一致，见 `deterministic_resume_comparison.json`。默认高性能 GPU 后端恢复的下一步 forward loss 完全相同，但 backward 有非确定性；不宣称默认后端逐位恢复。离散 64 张和连续完整 64 帧 clip 的编译推理、448 RGB/样本身份、已有图片跳过不变检查以及共享 evaluator smoke 均通过。连续 smoke 覆盖 TWE/TDE，FID/FVD 按共享 smoke 规则跳过；micro16、多卡和正式全量运行没有执行。完整结果、编译修复边界和证据见 [PEFT 验收报告](outputs/csgo_seen10_exp32gen_aligned_peft_smoke/acceptance_20260925_000701/ACCEPTANCE.md)。
 
 完整训练仍只在 3,900、7,800、11,700、15,600、19,500 验证保存；late/final 是主结果，best 为补充。小批量验收即使通过，也不自动启动正式 19,500-step 训练或 20,000/12,800 全量推理，由用户验收后手动执行。具体命令见 [CSGO_SEEN10.md](CSGO_SEEN10.md)。
+
+## 8. 跨服务器迁移接入（2026-09-25）
+
+参考 X-VLA、OpenVLA-OFT、RDT 的机器路径与实验配置分离方式，继续支持旧命令，并增加独立环境准备、路径打印和本地资产检查。定位项目的模型/head/优化配置没有移植到本项目。ControlAR 的生成评测依赖单独准备 `.venv-eval`，仅使用共享 evaluator，不回退到项目内旧指标副本。
+
+| 文件 | 本轮作用 |
+| --- | --- |
+| `csgo_seen10/paths.py` | CLI/env/config 路径优先级、旧机器默认路径缺失时回退、项目相对路径 |
+| `scripts/csgo_runtime_paths.py`、`scripts/run_csgo_seen10.sh` | 无模型导入的 `--print-paths`、三 profile 的统一数据/evaluator/Python 参数传递 |
+| `train_seen10.py`、`train_seen10_peft.py`、`infer_seen10.py` | 使用解析后的机器数据路径；保留其他预算/模型/checkpoint/预测身份约束 |
+| `scripts/validate_csgo_seen10_{aligned,peft}.py` | 对实际数据位置验证 manifest、split、calibration，不再把物理位置当作实验配方 |
+| `csgo_seen10/source_compat.py`、`csgo_seen10/legacy_source_resume.json` | 默认严格源码身份；显式、完整 SHA 白名单的旧同路径 checkpoint 恢复兼容审计 |
+| `scripts/setup_csgo_seen10.sh`、两个 `requirements-csgo-*.txt` | 独立训练/评测环境、已有环境保留、只读 CPU 导入检查和用户可选 BF16 CUDA 检查 |
+| `scripts/download_csgo_seen10_assets.py` | `--check` 完整本地哈希、`HF_ENDPOINT`，官方 revision/SHA 不变 |
+| `scripts/test_csgo_seen10_{paths,source_compat,entry_paths}.py`、`tests/test_csgo_{setup,runner_paths}.py` | 路径覆盖链路、恢复负例、临时环境 mock、无任务 runner 路由测试 |
+
+三个 canonical 配置 JSON、数据读取/预处理、模型、LoRA、采样公式和评测指标实现均未改动。新训练保存实际源码哈希和解析后的真实数据路径。旧同路径恢复的兼容操作需要 `--allow-legacy-source-resume`；跨路径旧 checkpoint/旧预测续写仍不支持，禁止改写其 identity 来绕过检查。
+
+本轮验收：18 项 CPU/脚本用例、实际复制 metadata 后的 aligned/PEFT 检查、真实历史 aligned/PEFT identity 的显式源码转换核验、当前环境 CPU 导入、官方权重完整哈希和脚本语法检查。未重新安装环境或执行训练/推理/评测任务，未运行 GPU smoke。新服务器稳定版依赖的实际安装、独立 `.venv-eval`、BF16/compile 硬件兼容和完整指标缓存仍需在目标服务器验证。证据见 [迁移验收报告](outputs/csgo_seen10_portability_checks/20260925_005013/ACCEPTANCE.md)，使用命令见主文档第 4 节。

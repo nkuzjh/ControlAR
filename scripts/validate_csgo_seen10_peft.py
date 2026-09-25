@@ -14,6 +14,7 @@ from scripts.validate_csgo_seen10_aligned import (
     VQ_SHA256, CHECKPOINT_STEPS, check_data_contract, check_checkpoint_contract,
     read_json, require, sha256_file,
 )
+from csgo_seen10.paths import data_root as resolve_data_root, evaluator_root, project_path
 
 EXPERIMENT = "csgo_seen10_exp32gen_aligned_peft"
 DEFAULT_CONFIG = ROOT / "configs" / f"{EXPERIMENT}.json"
@@ -80,7 +81,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--data-root", type=Path)
-    parser.add_argument("--eval-config", type=Path, default=DEFAULT_EVAL_CONFIG)
+    parser.add_argument("--eval-config", type=Path, default=None)
     parser.add_argument("--world-size", type=int)
     parser.add_argument("--batch-size", type=int)
     parser.add_argument("--gradient-accumulation-steps", type=int)
@@ -95,9 +96,9 @@ def main() -> None:
     args = parser.parse_args()
     config_path = args.config.resolve()
     config = load_config(config_path)
-    data_root = (args.data_root or Path(config["data_root"])).resolve()
-    require(data_root == Path(config["data_root"]).resolve(), "Data root differs from config")
-    require(args.eval_config.resolve().is_file(), "Shared evaluator config is missing")
+    data_root = resolve_data_root(config, args.data_root, root=ROOT).resolve()
+    eval_config = project_path(args.eval_config, ROOT) if args.eval_config is not None else evaluator_root(root=ROOT) / "benchmark_v2.yaml"
+    require(eval_config.is_file(), f"Shared evaluator config is missing: {eval_config}")
     require(args.inference_seed == 42, "PEFT inference seed is fixed at 42")
     batch = check_batch(
         args.world_size if args.world_size is not None else config["world_size"],

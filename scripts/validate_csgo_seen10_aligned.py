@@ -19,6 +19,8 @@ from typing import Any, Iterable
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from csgo_seen10.paths import data_root as resolve_data_root, evaluator_root, project_path
 ALIGNED_EXPERIMENT = "csgo_seen10_exp32gen_aligned"
 DEFAULT_CONFIG = ROOT / "configs" / f"{ALIGNED_EXPERIMENT}.json"
 DEFAULT_DATA_ROOT = Path("/home/jiahao/task/UniLIP/data/csgo_benchmark_v2")
@@ -357,7 +359,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Validate the aligned ControlAR CSGO contract without loading a model")
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--data-root", type=Path, default=None)
-    parser.add_argument("--eval-config", type=Path, default=DEFAULT_EVAL_CONFIG)
+    parser.add_argument("--eval-config", type=Path, default=None)
     parser.add_argument("--run-root", type=Path, default=None)
     parser.add_argument("--checkpoint-role", choices=("late", "best"), default="late")
     parser.add_argument("--inference-seed", type=int, default=42)
@@ -376,15 +378,11 @@ def main() -> int:
     args = parse_args()
     config_path = args.config.expanduser().resolve()
     config = load_config(config_path)
-    data_root = (args.data_root or Path(config["data_root"])).expanduser().resolve()
-    configured_data_root = Path(config["data_root"]).expanduser().resolve()
-    require(
-        data_root == configured_data_root,
-        f"Aligned data root must be {configured_data_root}, got {data_root}",
-    )
+    data_root = resolve_data_root(config, args.data_root, root=ROOT).resolve()
     data_contract = check_data_contract(data_root)
     checked_source = check_source_contract()
-    require(args.eval_config.expanduser().resolve().is_file(), f"Shared evaluator config not found: {args.eval_config}")
+    eval_config = project_path(args.eval_config, ROOT) if args.eval_config is not None else evaluator_root(root=ROOT) / "benchmark_v2.yaml"
+    require(eval_config.is_file(), f"Shared evaluator config not found: {eval_config}")
 
     result: dict[str, Any] = {
         "experiment": ALIGNED_EXPERIMENT,
