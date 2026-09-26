@@ -308,6 +308,12 @@ CUDA_VISIBLE_DEVICES=0 NPROC_PER_NODE=1 \
   --experiment csgo_seen10_exp32gen_aligned_peft --seed 42 \
   --batch-size 16 --gradient-accumulation-steps 8
 
+# 可选组合示例：双卡 2 x micro 16 × 累计 4；仅用于新 run 的首次启动。
+CUDA_VISIBLE_DEVICES=0,1 NPROC_PER_NODE=2 \
+  bash scripts/run_csgo_seen10.sh train \
+  --experiment csgo_seen10_exp32gen_aligned_peft --seed 42 \
+  --batch-size 16 --gradient-accumulation-steps 4
+
 # 示例：已有同一 run 的 step_008000.pt 且它是最新里程碑时，原组合恢复。
 CUDA_VISIBLE_DEVICES=0 NPROC_PER_NODE=1 \
   bash scripts/run_csgo_seen10.sh train \
