@@ -900,8 +900,10 @@ def main() -> None:
 
     torch_checkpoint = load_checkpoint(checkpoint_path)
     aligned_checkpoint_sha256: str | None = None
+    peft_checkpoint_origin: dict[str, str] | None = None
     if peft:
         from csgo_seen10.peft_artifact_contract import validate_peft_checkpoint
+        from csgo_seen10.inference_portability import validate_inference_data_identity
 
         assert data_contract is not None
         aligned_checkpoint_sha256 = validate_peft_checkpoint(
@@ -913,6 +915,9 @@ def main() -> None:
             data_root=args.data_root,
             data_contract=data_contract,
             smoke=args.smoke,
+        )
+        peft_checkpoint_origin = validate_inference_data_identity(
+            torch_checkpoint["identity"], args.data_root, data_contract
         )
     elif aligned:
         assert data_contract is not None
@@ -1021,6 +1026,7 @@ def main() -> None:
 
             assert data_contract is not None
             assert config_sha256 is not None
+            assert peft_checkpoint_origin is not None
             ensure_peft_output_manifest(
                 output_root,
                 task=task,
@@ -1034,6 +1040,7 @@ def main() -> None:
                 vq_checkpoint_path=str(args.vq_checkpoint),
                 vq_checkpoint_sha256=vq_checkpoint_sha256,
                 data_root=str(args.data_root),
+                checkpoint_origin=peft_checkpoint_origin,
                 data_contract=data_contract,
                 data_contract_sha256=data_contract["sha256"],
                 benchmark_manifest_sha256=data_contract["benchmark_manifest_sha256"],

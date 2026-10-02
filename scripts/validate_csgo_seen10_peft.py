@@ -115,7 +115,7 @@ def main() -> None:
         if not args.smoke:
             result["checkpoint"] = check_checkpoint_contract(
                 run_root, args.checkpoint_role, verify_all_sha256=args.verify_all_checkpoint_sha256,
-                checkpoint_steps=PEFT_CHECKPOINT_STEPS)
+                checkpoint_steps=PEFT_CHECKPOINT_STEPS, allow_copied_aliases=True)
         if args.check_artifacts:
             from csgo_seen10.peft_artifact_contract import preflight_peft_inference
             pred_root = run_root / "predictions" / args.checkpoint_role / f"inference_seed_{args.inference_seed}"

@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 from csgo_seen10.peft_artifact_contract import (
     EXPERIMENT, FORMAT, PEFT_CHECKPOINT_STEPS, validate_peft_checkpoint,
 )
+from csgo_seen10.artifact_contract import sha256_json
 from csgo_seen10.source_compat import check_resume_identity
 from scripts.validate_csgo_seen10_aligned import ContractError, check_checkpoint_contract
 from scripts.validate_csgo_seen10_peft import load_config
@@ -75,9 +76,16 @@ def main() -> None:
         expect_error(ContractError, "checkpoint milestones changed",
                      lambda: load_config(old_config_path, verify_weights=False))
 
+        protocol_files = [
+            {"path": name, "sha256": hashlib.sha256(name.encode()).hexdigest()}
+            for name in ("benchmark_manifest.json", "minimal_dataset_report.json",
+                         "calibration/z_calibration.json", "splits/seen/train.json")
+        ]
         data_contract = {
-            "benchmark_manifest_sha256": "manifest-test",
-            "minimal_dataset_report_sha256": "report-test",
+            "root": str(root), "files": protocol_files,
+            "benchmark_manifest_sha256": protocol_files[0]["sha256"],
+            "minimal_dataset_report_sha256": protocol_files[1]["sha256"],
+            "sha256": sha256_json(protocol_files),
         }
         files = {
             "config": hashlib.sha256(CONFIG_PATH.read_bytes()).hexdigest(),

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +13,10 @@ from csgo_seen10.artifact_contract import (
     benchmark_data_contract,
     rows_contract,
     sha256_file,
+)
+from csgo_seen10.inference_portability import (
+    validate_inference_data_identity,
+    validate_manifest_checkpoint_origin,
 )
 
 
@@ -44,6 +48,7 @@ def validate_peft_checkpoint(
     training = payload.get("training_config")
     if not all(isinstance(value, dict) for value in (args, identity, training)):
         raise ValueError("PEFT checkpoint lacks args, identity, or training configuration")
+    checkpoint_origin = validate_inference_data_identity(identity, data_root, data_contract)
     if args.get("experiment") != EXPERIMENT or config.get("experiment") != EXPERIMENT:
         raise ValueError("PEFT checkpoint experiment identity mismatch")
     if int(args.get("seed", -1)) != int(config["seed"]):
@@ -66,19 +71,8 @@ def validate_peft_checkpoint(
     for name, expected in expected_files.items():
         if files.get(name) != expected:
             raise ValueError(f"PEFT checkpoint {name} identity hash mismatch")
-    if identity.get("data_root") != str(data_root):
-        raise ValueError("PEFT checkpoint data root mismatch")
     if identity.get("experiment") != EXPERIMENT:
         raise ValueError("PEFT checkpoint identity experiment mismatch")
-    if identity.get("benchmark_data_contract") != data_contract:
-        raise ValueError("PEFT checkpoint benchmark data contract mismatch")
-    identity_copy = dict(identity)
-    saved_identity_sha256 = identity_copy.pop("identity_sha256", None)
-    # Training identity uses compact JSON without a trailing newline; the
-    # artifact helper hashes newline-terminated JSON for a different contract.
-    identity_bytes = json.dumps(identity_copy, sort_keys=True, separators=(",", ":"), default=str).encode("utf-8")
-    if saved_identity_sha256 != hashlib.sha256(identity_bytes).hexdigest():
-        raise ValueError("PEFT checkpoint identity digest mismatch")
     code = files.get("code")
     if not isinstance(code, dict) or "csgo_seen10/peft.py" not in code:
         raise ValueError("PEFT checkpoint lacks LoRA implementation identity")
@@ -161,11 +155,20 @@ def validate_peft_checkpoint(
     if selected.get("path") != f"step_{step:06d}.pt":
         raise ValueError("PEFT checkpoint index has a noncanonical milestone path")
     milestone_path = checkpoint_path.parent / selected["path"]
-    if not milestone_path.is_file() or not os.path.samefile(checkpoint_path, milestone_path):
+    if not milestone_path.is_file():
         raise ValueError("PEFT checkpoint alias differs from its indexed milestone")
     digest = sha256_file(checkpoint_path)
-    if selected.get("sha256") != digest:
+    if selected.get("sha256") != digest or (
+        not os.path.samefile(checkpoint_path, milestone_path)
+        and sha256_file(milestone_path) != digest
+    ):
         raise ValueError("PEFT checkpoint index SHA256 mismatch")
+    if checkpoint_origin["training_data_root"] != str(data_root):
+        print(
+            "PEFT checkpoint data root relocation: "
+            f"training={checkpoint_origin['training_data_root']} current={data_root}",
+            file=sys.stderr,
+        )
     return digest
 
 
@@ -176,6 +179,11 @@ def ensure_peft_output_manifest(output_root: Path, *, task: str, rows: list[dict
         raise ValueError("PEFT prediction manifest experiment mismatch")
     if identity.get("checkpoint_role") not in ("best", "late"):
         raise ValueError("PEFT prediction manifest role mismatch")
+    checkpoint_origin = identity.get("checkpoint_origin")
+    if not isinstance(checkpoint_origin, dict) or set(checkpoint_origin) != {
+        "training_data_root", "training_identity_sha256"
+    }:
+        raise ValueError("PEFT prediction manifest lacks checkpoint origin")
     expected = {
         "schema_version": SCHEMA_VERSION,
         "manifest_version": 1,
@@ -194,7 +202,9 @@ def ensure_peft_output_manifest(output_root: Path, *, task: str, rows: list[dict
         if not isinstance(previous, dict):
             raise ValueError("Existing PEFT inference manifest is invalid")
         for key, value in expected.items():
-            if key not in ("tasks", "task_rows") and previous.get(key) != value:
+            if key == "checkpoint_origin":
+                validate_manifest_checkpoint_origin(previous, value, Path(identity["data_root"]))
+            elif key not in ("tasks", "task_rows") and previous.get(key) != value:
                 raise ValueError(f"Existing PEFT prediction identity mismatch: {key}")
         prior_rows = previous.get("task_rows")
         if not isinstance(prior_rows, dict):
@@ -239,16 +249,21 @@ def preflight_peft_inference(
     config = json.loads(config_path.read_text(encoding="utf-8"))
     if config.get("experiment") != EXPERIMENT:
         raise ValueError("PEFT preflight requires the PEFT profile")
-    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    payload = torch.load(checkpoint_path, map_location="cpu", weights_only=False, mmap=True)
+    current_contract = benchmark_data_contract(data_root)
     digest = validate_peft_checkpoint(
         checkpoint_path, payload, checkpoint_role=checkpoint_role,
         config_path=config_path, config=config, data_root=data_root,
-        data_contract=benchmark_data_contract(data_root), smoke=smoke,
+        data_contract=current_contract, smoke=smoke,
+    )
+    checkpoint_origin = validate_inference_data_identity(
+        payload["identity"], data_root, current_contract
     )
     rows = read_benchmark_rows(data_root, {"discrete": "seen_discrete_test", "continuous": "seen_continuous"}[task], max_samples=max_samples, require_images=False)
     audit = audit_task_outputs(output_root, task, rows, require_complete=not smoke)
     manifest_path = Path(output_root).expanduser().resolve() / "inference_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    validate_manifest_checkpoint_origin(manifest, checkpoint_origin, data_root)
     expected_manifest = {
         "experiment": EXPERIMENT,
         "checkpoint_role": checkpoint_role,
@@ -257,7 +272,7 @@ def preflight_peft_inference(
         "checkpoint_path": str(checkpoint_path),
         "checkpoint_sha256": digest,
         "data_root": str(data_root),
-        "data_contract": benchmark_data_contract(data_root),
+        "data_contract": current_contract,
         "seed": int(config["seed"]),
         "inference_seed": int(config["inference_seed"]),
         "smoke_only": bool(smoke),
@@ -313,8 +328,17 @@ def preflight_evaluation(
         raise ValueError("PEFT formal evaluation cannot use max_samples")
     if checkpoint.name != f"{expected_role}.pt" or not checkpoint.is_file():
         raise ValueError("Selected PEFT evaluation checkpoint alias is invalid")
-    checkpoint_sha256 = sha256_file(checkpoint)
     current_contract = benchmark_data_contract(data_root)
+    import torch
+
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False, mmap=True)
+    checkpoint_sha256 = validate_peft_checkpoint(
+        checkpoint, payload, checkpoint_role=expected_role,
+        config_path=config_path, config=config, data_root=data_root,
+        data_contract=current_contract, smoke=False,
+    )
+    checkpoint_origin = validate_inference_data_identity(payload["identity"], data_root, current_contract)
+    validate_manifest_checkpoint_origin(manifest, checkpoint_origin, data_root)
     expected = {
         "checkpoint_role": expected_role,
         "config_sha256": expected_config_sha256,
@@ -359,19 +383,4 @@ def preflight_evaluation(
     recorded = completion.get("tasks", {}).get(task)
     if not isinstance(recorded, dict) or any(recorded.get(key) != audit[key] for key in ("rows", "expected_count", "actual_count", "complete")):
         raise ValueError("PEFT evaluation completion audit mismatch")
-    index = json.loads((checkpoint.parent / "checkpoint_index.json").read_text(encoding="utf-8"))
-    records = index.get("checkpoints", ())
-    if tuple(int(value) for value in config["checkpoint_steps"]) != PEFT_CHECKPOINT_STEPS:
-        raise ValueError("PEFT evaluation config milestones mismatch")
-    if tuple(sorted(int(record.get("step", -1)) for record in records)) != PEFT_CHECKPOINT_STEPS:
-        raise ValueError("PEFT evaluation checkpoint index milestones mismatch")
-    selected_step = 19500 if expected_role == "late" else int(index.get("best_step", -1))
-    if int(index.get("late_step", -1)) != 19500:
-        raise ValueError("PEFT evaluation index has no final checkpoint")
-    selected = next((record for record in records if int(record.get("step", -1)) == selected_step), None)
-    if not isinstance(selected, dict) or selected.get("path") != f"step_{selected_step:06d}.pt":
-        raise ValueError("PEFT evaluation checkpoint index alias mismatch")
-    milestone = checkpoint.parent / selected["path"]
-    if not milestone.is_file() or not os.path.samefile(checkpoint, milestone) or selected.get("sha256") != checkpoint_sha256:
-        raise ValueError("PEFT evaluation checkpoint alias/hash mismatch")
     return {"manifest": manifest, "completion": completion, "checkpoint_sha256": checkpoint_sha256, "task_audit": audit}

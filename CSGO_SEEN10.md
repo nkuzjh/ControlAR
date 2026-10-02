@@ -205,11 +205,34 @@ bash scripts/run_csgo_seen10.sh eval \
 
 ### 4.3 恢复边界
 
-本次迁移支持在另一服务器从官方 base **重新开始同配方实验**，随后在那台服务器训练、推理和评测。旧 checkpoint/预测 manifest 中的绝对数据路径及完整身份校验没有放宽；直接复制旧 run 到另一数据路径不等于支持精确续训或续写，默认会拒绝身份不匹配。不要手工改旧 checkpoint 或 manifest。
+环境迁移支持在另一服务器从官方 base **重新开始同配方实验**，随后在那台服务器训练、推理和评测。**精确训练 resume 及已有预测目录的续写仍严格检查原身份和路径**；直接复制旧 run 到另一数据路径不等于支持精确续训或续写。2026-10-02 新增的 PEFT checkpoint 跨服务器推理支持见下节，它不放宽训练 resume，也不修改旧 checkpoint 或 manifest。
 
 本次路径接入修改了训练入口源码，因此历史同路径 checkpoint 的源码 SHA 与当前版本不同。默认恢复仍严格拒绝；仅对本次明确登记的旧版本，可在原数据路径、配置、权重等全部一致时，在原 `train ... --resume <checkpoint>` 命令末尾追加 `--allow-legacy-source-resume`。该选项检查已登记的旧/新源码完整 SHA 集合并写入兼容审计，新 checkpoint 保存当前真实源码身份；它不能跨路径迁移，也不能跳过任意代码变化。无需该选项的新版本同路径恢复沿用第 5 节命令。原运行中的训练进程不会被停止或重启。
 
 本轮迁移实现与只读验收记录见 [迁移验收报告](outputs/csgo_seen10_portability_checks/20260925_005013/ACCEPTANCE.md)。该历史验收通过 CPU 导入与资产检查，当时未安装项目 `.venv-eval`。当前默认改用共享评测器自身 `.venv`；环境由共享仓库独立管理，完整硬件与 GPU smoke 仍由目标服务器执行。
+
+### 4.4 PEFT checkpoint 跨服务器推理与评测
+
+`aligned_peft` 允许将另一服务器训练完成的 checkpoint 同步回来后，用本机数据路径执行原有 `infer` / `eval` 命令，无需重写权重中的路径或重新训练。同步时保留完整五个 step 文件、`best.pt` / `late.pt`、`checkpoint_index.json` 以及 run 的参数审计文件。原 aligned 的迁移约束不因本次 PEFT 修改而改变。
+
+推理先校验 checkpoint 原始训练 identity 的摘要及其内部路径一致性，再核对当前数据协议：只允许 `data_root` 和数据合同顶层 `root` 的机器位置变化，manifest、report、split、calibration 文件列表及哈希等其他字段必须完全一致。配置、官方权重身份、LoRA 实现、seed、训练预算和里程碑仍严格检查。这是发布协议文件的内容校验，不是重新遍历全部图像计算哈希。
+
+checkpoint 保留原始训练路径及原 identity，不就地修改。新预测 manifest 增加 `checkpoint_origin`，记录 `training_data_root` 和 `training_identity_sha256`；原有 `data_root` / `data_contract` 记录本机实际读取位置。已有同路径、无该新字段的预测记录仍兼容；跨路径预测必须具有匹配的来源记录。本功能不允许在旧服务器的预测目录上直接续写，也不允许混入其他 checkpoint 的图片。
+
+训练依然将 `best.pt` / `late.pt` 保存为硬链接。PEFT 推理及评测读取时也接受普通复制得到的独立文件，但别名文件、对应 step 文件与 index 中的 SHA256 必须一致。`late` 仍必须为 step19500，`best` 仍必须对应索引的最佳点；相同文件名或文件大小不构成通过条件。原 aligned 的默认硬链接校验和训练精确恢复规则保持不变。
+
+以下命令由用户手动执行；`&&` 确保推理成功后才继续评测：
+
+```bash
+bash scripts/run_csgo_seen10.sh infer \
+  --experiment csgo_seen10_exp32gen_aligned_peft --checkpoint-role late \
+  --seed 42 --inference-seed 42 --task all && \
+bash scripts/run_csgo_seen10.sh eval \
+  --experiment csgo_seen10_exp32gen_aligned_peft --checkpoint-role late \
+  --seed 42 --inference-seed 42 --task all
+```
+
+非默认数据位置使用 `CSGO_DATA_ROOT` 或两条命令均传 `--data-root`。新增/修改的验证逻辑位于 `csgo_seen10/inference_portability.py`、`csgo_seen10/peft_artifact_contract.py` 和项目侧 validators，不修改共享评测器。
 
 ## 5. 直接执行命令
 

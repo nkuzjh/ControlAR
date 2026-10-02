@@ -251,6 +251,7 @@ def check_source_contract() -> list[str]:
 def check_checkpoint_contract(
     run_root: Path, role: str, *, verify_all_sha256: bool = False,
     checkpoint_steps: tuple[int, ...] = CHECKPOINT_STEPS,
+    allow_copied_aliases: bool = False,
 ) -> dict[str, Any]:
     run_root = run_root.expanduser().resolve()
     checkpoint_dir = run_root / "checkpoints"
@@ -266,7 +267,18 @@ def check_checkpoint_contract(
             f"Checkpoint index late_step is not {checkpoint_steps[-1]}")
     best_step = int(index.get("best_step", -1))
     require(best_step in checkpoint_steps, "Checkpoint index best_step is not one of the five milestones")
+    if allow_copied_aliases:
+        best_records = [record for record in records if record.get("is_best") is True]
+        require(
+            len(best_records) == 1 and int(best_records[0]["step"]) == best_step,
+            "Checkpoint index best record does not match best_step",
+        )
     for record in records:
+        if allow_copied_aliases:
+            require(
+                record.get("path") == f"step_{int(record['step']):06d}.pt",
+                "Checkpoint index has a noncanonical milestone path",
+            )
         path = checkpoint_dir / str(record.get("path", ""))
         require(path.is_file(), f"Indexed checkpoint is missing: {path}")
         require(record.get("sha256"), f"Indexed checkpoint has no SHA256: {path}")
@@ -280,9 +292,26 @@ def check_checkpoint_contract(
     late_path = checkpoint_dir / "late.pt"
     require(late_path.is_file(), "late.pt is missing")
     final_path = checkpoint_dir / f"step_{checkpoint_steps[-1]:06d}.pt"
-    require(late_path.samefile(final_path), f"late.pt does not reference {final_path.name}")
+    late_record = next(record for record in records if int(record["step"]) == checkpoint_steps[-1])
+    require(
+        late_path.samefile(final_path) or (
+            allow_copied_aliases
+            and sha256_file(late_path) == sha256_file(final_path) == late_record["sha256"]
+        ),
+        (f"late.pt does not match {final_path.name}" if allow_copied_aliases
+         else f"late.pt does not reference {final_path.name}"),
+    )
     best_record = next(record for record in records if int(record["step"]) == best_step)
-    require((checkpoint_dir / "best.pt").samefile(checkpoint_dir / str(best_record["path"])), "best.pt does not reference indexed best checkpoint")
+    best_path = checkpoint_dir / "best.pt"
+    best_milestone = checkpoint_dir / str(best_record["path"])
+    require(
+        best_path.samefile(best_milestone) or (
+            allow_copied_aliases
+            and sha256_file(best_path) == sha256_file(best_milestone) == best_record["sha256"]
+        ),
+        ("best.pt does not match indexed best checkpoint" if allow_copied_aliases
+         else "best.pt does not reference indexed best checkpoint"),
+    )
     return {
         "checkpoint_dir": str(checkpoint_dir),
         "role": role,

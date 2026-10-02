@@ -208,3 +208,17 @@ PEFT 完整训练只在 4,000、8,000、12,000、16,000、19,500 验证保存；
 配置、训练终止检查、checkpoint index 校验及推理/评测前检查使用同一组新里程碑。本次改变了 PEFT 配置身份，旧 3900 周期 checkpoint 不能通过源码兼容开关混入新配置；已有历史产物不改写。
 
 验收：PEFT 与原 aligned 静态配置/数据/权重检查通过；`scripts/test_csgo_seen10_peft_milestones.py` 的 CPU 临时 checkpoint 测试通过，覆盖五个新里程碑、最佳点在最终步之前/最终步、best/late 同文件链接、SHA 校验和旧周期拒绝。未启动训练、推理或评测。
+
+## 11. PEFT 已训 checkpoint 跨服务器推理（2026-10-02）
+
+远程训练产物记录的数据位置是 `/home/user/yc57963/task/UniLIP/data/csgo_benchmark_v2`，本机数据位置是 `/home/jiahao/task/UniLIP/data/csgo_benchmark_v2`；实际 benchmark data contract 仅顶层 `root` 不同。同步后的 `late.pt`、`best.pt` 与 `step_019500.pt` 是不同 inode 的独立副本，内容 SHA256 都与最终步索引一致。原校验同时要求绝对路径一致及硬链接关系，导致 infer 与 eval 前置检查分别失败。
+
+本轮按已批准方案只修改 PEFT 推理/项目侧评测读取规则，不重写 checkpoint、index、旧预测或训练配置：
+
+- `csgo_seen10/inference_portability.py` 先验证原训练 identity 摘要及内部路径自洽，仅排除数据 contract 顶层 `root` 比较，其余内容精确匹配；返回原始训练路径和 identity SHA。
+- `csgo_seen10/peft_artifact_contract.py` 在 checkpoint 验证及两类预测 preflight 中使用该规则。普通复制的 best/late 需与对应 milestone 文件及 index SHA 三方一致；步数、角色、配置、基础权重身份、LoRA 实现等检查保留。评测 preflight 通过 CPU mmap 读取 checkpoint，不构造模型或初始化 CUDA。
+- `infer_seen10.py` 为新 PEFT 预测 manifest 记录 `checkpoint_origin`，本机 `data_root` 仍独立记录。旧同路径且无来源字段的 manifest 保持兼容，不补写旧身份；异地预测续写及错误来源仍拒绝。
+- `scripts/validate_csgo_seen10_aligned.py` 的副本兼容默认关闭，仅 PEFT validator 显式启用。该分支同时检查全部 milestone 路径规范和唯一 best 记录。原 aligned 默认行为保留。
+- 训练入口、模型、LoRA、数据读取、通用 artifact contract、source resume 和 canonical 配置均未改动；13 个受保护源码/配置文件的 SHA 保持原样。跨路径精确训练恢复仍拒绝。
+
+验收包含 `tests/test_csgo_peft_portability.py` 的 CPU 迁移与负例检查、旧 milestone 测试、严格 source resume 测试，以及本机真实 best/late checkpoint 的 CPU identity/hash 验证。预测 preflight 的测试使用临时元数据与模拟图像审计，不代表已执行真实图像生成或指标计算。详细结果见 [验收记录](outputs/csgo_seen10_portability_checks/checkpoint_transfer_20261002_034731/acceptance.json) 和同目录日志；真实权重检查见 [checkpoint 验证记录](outputs/csgo_seen10_portability_checks/checkpoint_transfer_20261002_034731/real_checkpoint_validation.json)。本轮未启动训练、推理或评测，未修改共享 evaluator；手动命令见主文档第 4.4 节。
